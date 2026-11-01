@@ -10,19 +10,22 @@ const PUBLIC_PATHS = [
   '/favicon.ico',
 ];
 
+const VALID_TENANTS = ['nawaloka', 'asiri', 'arogya', 'suwapiyasa'];
+
 export function middleware(request: NextRequest) {
   const { pathname, searchParams } = request.nextUrl;
   const hostname = request.headers.get('host') || '';
 
-  // Extract requested tenant from subdomain (e.g. nawaloka.lvh.me or nawaloka.mediflow.lk) or query param
+  // Extract requested tenant safely (matches known tenants only, ignoring deployment suffixes like medi-flow-indol.vercel.app)
   let requestedTenant: string | null = null;
-  const hostParts = hostname.split(':')[0].split('.');
-  if (hostParts.length > 1 && hostParts[0] !== 'www' && hostParts[0] !== 'localhost' && hostParts[0] !== 'admin') {
+  const hostParts = hostname.split(':')[0].toLowerCase().split('.');
+  
+  if (VALID_TENANTS.includes(hostParts[0])) {
     requestedTenant = hostParts[0];
-  } else if (searchParams.get('clinic')) {
-    requestedTenant = searchParams.get('clinic');
-  } else if (searchParams.get('tenant')) {
-    requestedTenant = searchParams.get('tenant');
+  } else if (searchParams.get('clinic') && VALID_TENANTS.includes(searchParams.get('clinic')!.toLowerCase())) {
+    requestedTenant = searchParams.get('clinic')!.toLowerCase();
+  } else if (searchParams.get('tenant') && VALID_TENANTS.includes(searchParams.get('tenant')!.toLowerCase())) {
+    requestedTenant = searchParams.get('tenant')!.toLowerCase();
   }
 
   // 1. Allow public paths and dynamic patient mobile tracker (/q/[token])

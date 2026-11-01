@@ -23,45 +23,53 @@ import {
   Sparkles
 } from 'lucide-react';
 
+const CLINIC_PRESETS = [
+  { id: 'nawaloka', name: 'Nawaloka Outpatient Care' },
+  { id: 'asiri', name: 'Asiri Health' },
+  { id: 'arogya', name: 'Arogya Medical Centre' },
+  { id: 'suwapiyasa', name: 'Suwa Piyasa Family Clinic' },
+];
+
 export default function LoginPage() {
   const router = useRouter();
   const { tenantId, settings, setTenantId } = useClinic();
 
-  const [loginType, setLoginType] = useState<'superadmin' | 'staff'>('superadmin');
-  const [email, setEmail] = useState<string>('owner@mediflow.lk');
-  const [password, setPassword] = useState<string>('admin123');
+  const [loginType, setLoginType] = useState<'superadmin' | 'staff'>('staff');
+  const [email, setEmail] = useState<string>('doctor@clinic.com');
+  const [password, setPassword] = useState<string>('password123');
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
   const [isClinicScoped, setIsClinicScoped] = useState<boolean>(false);
 
-  // Auto-detect clinic from subdomain or query param
+  // Auto-detect clinic safely (Only recognizes verified clinic tenants, never vercel platform URLs)
   React.useEffect(() => {
     if (typeof window !== 'undefined') {
       const urlParams = new URLSearchParams(window.location.search);
       const clinicParam = urlParams.get('clinic') || urlParams.get('tenant');
-      const hostname = window.location.hostname;
+      const hostname = window.location.hostname.toLowerCase();
       const parts = hostname.split('.');
-      const isSubdomain = parts.length > 1 && parts[0] !== 'www' && parts[0] !== 'localhost' && parts[0] !== 'admin';
+      const isKnownSubdomain = CLINIC_PRESETS.some(c => c.id === parts[0]);
 
-      if (clinicParam) {
+      if (clinicParam && CLINIC_PRESETS.some(c => c.id === clinicParam.toLowerCase())) {
         setIsClinicScoped(true);
-        setTenantId(clinicParam);
+        setTenantId(clinicParam.toLowerCase());
         setLoginType('staff');
         setEmail('doctor@clinic.com');
         setPassword('password123');
-      } else if (isSubdomain) {
+      } else if (isKnownSubdomain) {
         setIsClinicScoped(true);
         setTenantId(parts[0]);
         setLoginType('staff');
         setEmail('doctor@clinic.com');
         setPassword('password123');
       } else {
-        // Root / Main Landlord Gateway: ALWAYS SuperAdmin / Platform Owner
+        // Platform domain or root URL: Default to Nawaloka clinic staff with SuperAdmin toggle available
         setIsClinicScoped(false);
-        setLoginType('superadmin');
-        setEmail('owner@mediflow.lk');
-        setPassword('admin123');
+        setTenantId('nawaloka');
+        setLoginType('staff');
+        setEmail('doctor@clinic.com');
+        setPassword('password123');
       }
     }
   }, [setTenantId]);
@@ -187,6 +195,40 @@ export default function LoginPage() {
 
       <div className="mt-6 sm:mx-auto sm:w-full sm:max-w-md relative z-10">
         <div className="bg-slate-900/90 backdrop-blur-xl py-8 px-6 shadow-2xl rounded-2xl border border-slate-800 sm:px-10">
+          {/* Portal Switcher Tabs (Staff vs SuperAdmin) */}
+          <div className="flex bg-slate-950 p-1 rounded-xl mb-5 border border-slate-800">
+            <button
+              type="button"
+              onClick={() => {
+                setLoginType('staff');
+                setEmail('doctor@clinic.com');
+                setPassword('password123');
+              }}
+              className={`flex-1 py-1.5 text-xs font-bold rounded-lg transition ${
+                loginType === 'staff'
+                  ? 'bg-teal-600 text-white shadow'
+                  : 'text-slate-400 hover:text-white'
+              }`}
+            >
+              🏥 Clinic Staff
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setLoginType('superadmin');
+                setEmail('owner@mediflow.lk');
+                setPassword('admin123');
+              }}
+              className={`flex-1 py-1.5 text-xs font-bold rounded-lg transition ${
+                loginType === 'superadmin'
+                  ? 'bg-teal-600 text-white shadow'
+                  : 'text-slate-400 hover:text-white'
+              }`}
+            >
+              🏢 Platform SuperAdmin
+            </button>
+          </div>
+
           {/* Context Banner */}
           {loginType === 'superadmin' ? (
             <div className="mb-6 p-3.5 bg-slate-950/80 rounded-xl border border-teal-500/30 flex items-center space-x-3">
@@ -235,6 +277,25 @@ export default function LoginPage() {
 
           {/* Login Form */}
           <form className="space-y-4" onSubmit={handleLogin}>
+            {/* Clinic Dropdown when in Staff mode */}
+            {loginType === 'staff' && (
+              <div>
+                <label className="block text-xs font-bold text-slate-300 uppercase tracking-wider mb-1">
+                  Selected Clinic Tenant
+                </label>
+                <select
+                  value={tenantId}
+                  onChange={(e) => setTenantId(e.target.value)}
+                  className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-lg text-sm text-teal-300 font-bold focus:outline-none focus:ring-2 focus:ring-teal-500"
+                >
+                  {CLINIC_PRESETS.map((c) => (
+                    <option key={c.id} value={c.id}>
+                      🏥 {c.name} ({c.id})
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
             <div>
               <label className="block text-xs font-bold text-slate-300 uppercase tracking-wider mb-1">
                 {loginType === 'superadmin' ? 'SuperAdmin Email' : 'Staff Email Address'}

@@ -58,36 +58,42 @@ const ClinicContext = createContext<ClinicContextType>({
   refreshSettings: async () => {},
 });
 
+export const KNOWN_TENANTS = ['nawaloka', 'asiri', 'arogya', 'suwapiyasa'];
+
 export const ClinicProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const [tenantId, setTenantIdState] = useState<string>('arogya');
+  const [tenantId, setTenantIdState] = useState<string>('nawaloka');
   const [settings, setSettings] = useState<ClinicSettings>(defaultSettings);
   const [isLoading, setIsLoading] = useState<boolean>(true);
 
   const setTenantId = (id: string) => {
-    setTenantIdState(id);
-    ApiClient.setTenant(id);
+    const validTenant = KNOWN_TENANTS.includes(id) ? id : 'nawaloka';
+    setTenantIdState(validTenant);
+    ApiClient.setTenant(validTenant);
   };
 
-  // Automatic Subdomain & URL Tenant Resolution (Zero tenant exposure)
+  // Automatic Subdomain & URL Tenant Resolution (Safe against Vercel/Render hostnames)
   useEffect(() => {
     if (typeof window !== 'undefined') {
-      const hostname = window.location.hostname;
+      const hostname = window.location.hostname.toLowerCase();
       const parts = hostname.split('.');
 
-      let resolvedTenant = 'arogya';
+      let resolvedTenant = 'nawaloka';
 
-      // Subdomain resolution (e.g. suwapiyasa.mediflow.lk or nawaloka.lvh.me)
-      if (parts.length > 1 && parts[0] !== 'www' && parts[0] !== 'localhost' && parts[0] !== 'admin') {
+      // 1. Explicit query parameter (?clinic=nawaloka or ?tenant=nawaloka)
+      const urlParams = new URLSearchParams(window.location.search);
+      const queryTenant = urlParams.get('clinic') || urlParams.get('tenant');
+      if (queryTenant && KNOWN_TENANTS.includes(queryTenant.toLowerCase())) {
+        resolvedTenant = queryTenant.toLowerCase();
+      } 
+      // 2. Multi-tenant subdomain (e.g. nawaloka.lvh.me, nawaloka.mediflow.lk, nawaloka.medi-flow-indol.vercel.app)
+      else if (KNOWN_TENANTS.includes(parts[0])) {
         resolvedTenant = parts[0];
-      } else {
-        // Query param resolution (?clinic=suwapiyasa)
-        const urlParams = new URLSearchParams(window.location.search);
-        const queryTenant = urlParams.get('clinic') || urlParams.get('tenant');
-        if (queryTenant) {
-          resolvedTenant = queryTenant;
-        } else {
-          const stored = localStorage.getItem('mediflow_tenant_id');
-          if (stored) resolvedTenant = stored;
+      } 
+      // 3. Stored tenant from previous user selection
+      else {
+        const stored = localStorage.getItem('mediflow_tenant_id');
+        if (stored && KNOWN_TENANTS.includes(stored)) {
+          resolvedTenant = stored;
         }
       }
 
