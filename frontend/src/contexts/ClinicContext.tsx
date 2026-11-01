@@ -60,15 +60,56 @@ const ClinicContext = createContext<ClinicContextType>({
 
 export const KNOWN_TENANTS = ['nawaloka', 'asiri', 'arogya', 'suwapiyasa'];
 
+export const CLINIC_INFO_MAP: Record<string, ClinicBranding> = {
+  nawaloka: {
+    clinic_name: 'Nawaloka Outpatient Care',
+    tagline: 'Leading Healthcare Excellence & Diagnostics',
+    registration_no: 'PHSRC/COL/2026/01',
+    address: 'No. 23, Deshamanya H.K. Dharmadasa Mw, Colombo 02',
+    phone: '+94 11 557 7111',
+  },
+  asiri: {
+    clinic_name: 'Asiri Health Outpatient',
+    tagline: 'Caring for Your Health, Everyday',
+    registration_no: 'PHSRC/COL/2026/02',
+    address: 'No. 181, Kirula Road, Narahenpita, Colombo 05',
+    phone: '+94 11 452 4400',
+  },
+  arogya: {
+    clinic_name: 'Arogya Medical Centre',
+    tagline: 'Compassionate & Modern Outpatient Care',
+    registration_no: 'PHSRC/COL/2026/89',
+    address: 'No. 142, Galle Road, Colombo 03',
+    phone: '+94 11 258 9632',
+  },
+  suwapiyasa: {
+    clinic_name: 'Suwa Piyasa Family Clinic',
+    tagline: 'Quality Primary Healthcare for the Whole Family',
+    registration_no: 'PHSRC/KAN/2026/142',
+    address: 'No. 88, Peradeniya Road, Kandy',
+    phone: '+94 81 223 4567',
+  },
+};
+
 export const ClinicProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [tenantId, setTenantIdState] = useState<string>('nawaloka');
-  const [settings, setSettings] = useState<ClinicSettings>(defaultSettings);
+  const [settings, setSettings] = useState<ClinicSettings>(() => ({
+    ...defaultSettings,
+    clinic_branding: CLINIC_INFO_MAP['nawaloka'],
+  }));
   const [isLoading, setIsLoading] = useState<boolean>(true);
 
   const setTenantId = (id: string) => {
     const validTenant = KNOWN_TENANTS.includes(id) ? id : 'nawaloka';
     setTenantIdState(validTenant);
     ApiClient.setTenant(validTenant);
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('mediflow_tenant_id', validTenant);
+    }
+    setSettings(prev => ({
+      ...prev,
+      clinic_branding: CLINIC_INFO_MAP[validTenant] || prev.clinic_branding,
+    }));
   };
 
   // Automatic Subdomain & URL Tenant Resolution (Safe against Vercel/Render hostnames)
@@ -110,34 +151,14 @@ export const ClinicProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         setSettings(response.settings);
       }
     } catch {
-      // Fallback to default / mock values if API offline
-      if (tenantId === 'suwapiyasa') {
-        setSettings({
-          ...defaultSettings,
-          consultation_payment_timing: 'BEFORE',
-          pharmacy_enabled: false,
-          clinic_branding: {
-            clinic_name: 'Suwa Piyasa Family Clinic',
-            tagline: 'Quality Primary Healthcare for the Whole Family',
-            registration_no: 'PHSRC/KAN/2026/142',
-            address: 'No. 88, Peradeniya Road, Kandy',
-            phone: '+94 81 223 4567',
-          },
-        });
-      } else {
-        setSettings({
-          ...defaultSettings,
-          consultation_payment_timing: 'AFTER',
-          pharmacy_enabled: true,
-          clinic_branding: {
-            clinic_name: 'Arogya Medical Centre',
-            tagline: 'Compassionate & Modern Outpatient Care',
-            registration_no: 'PHSRC/COL/2026/89',
-            address: 'No. 142, Galle Road, Colombo 03',
-            phone: '+94 11 258 9632',
-          },
-        });
-      }
+      // Fallback to clinic preset branding if API offline
+      const info = CLINIC_INFO_MAP[tenantId] || CLINIC_INFO_MAP['nawaloka'];
+      setSettings({
+        ...defaultSettings,
+        consultation_payment_timing: tenantId === 'suwapiyasa' ? 'BEFORE' : 'AFTER',
+        pharmacy_enabled: tenantId !== 'suwapiyasa',
+        clinic_branding: info,
+      });
     } finally {
       setIsLoading(false);
     }
