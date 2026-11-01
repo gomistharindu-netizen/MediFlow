@@ -171,6 +171,7 @@ export default function CashierPage() {
   const [queueVisits, setQueueVisits] = useState<QueueVisit[]>([]);
   const [selectedInvoice, setSelectedInvoice] = useState<InvoiceRecord | null>(null);
   const [reconciliation, setReconciliation] = useState<ReconciliationReport | null>(null);
+  const [reconDate, setReconDate] = useState<string>(() => new Date().toISOString().split('T')[0]);
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [isSettling, setIsSettling] = useState<boolean>(false);
   const [searchQuery, setSearchQuery] = useState<string>('');
@@ -237,6 +238,49 @@ export default function CashierPage() {
       setIsLoading(false);
     }
   }, []);
+
+  const fetchReconciliationForDate = async (dateStr: string) => {
+    try {
+      const res = await ApiClient.get<{ success: boolean; data: ReconciliationReport }>(`/reports/reconciliation?date=${dateStr}`);
+      if (res?.success && res.data) {
+        setReconciliation(res.data);
+      }
+    } catch (e) {
+      console.warn('Could not load reconciliation for date:', e);
+    }
+  };
+
+  const handleExportReconciliationCsv = () => {
+    if (!reconciliation || !reconciliation.transactions) return;
+
+    const headers = ['Time', 'Receipt Number', 'Invoice Number', 'Patient Name', 'Payment Method', 'Cashier', 'Amount (LKR)'];
+    const rows = reconciliation.transactions.map(t => [
+      t.time,
+      t.receipt_number,
+      t.invoice_number,
+      `"${(t.patient_name || '').replace(/"/g, '""')}"`,
+      t.payment_method,
+      `"${(t.cashier_name || '').replace(/"/g, '""')}"`,
+      Number(t.amount).toFixed(2),
+    ]);
+
+    rows.push([]);
+    rows.push(['SUMMARY BREAKDOWN', '', '', '', '', '', '']);
+    rows.push(['Gross Revenue Total', '', '', '', '', '', Number(reconciliation.total_collected).toFixed(2)]);
+    rows.push(['Cash in Drawer', '', '', '', '', '', Number(reconciliation.payment_breakdown.cash).toFixed(2)]);
+    rows.push(['Card POS Total', '', '', '', '', '', Number(reconciliation.payment_breakdown.card).toFixed(2)]);
+    rows.push(['LankaQR / Online', '', '', '', '', '', Number(reconciliation.payment_breakdown.qr_pay).toFixed(2)]);
+    rows.push(['Bank Transfer', '', '', '', '', '', Number(reconciliation.payment_breakdown.bank_transfer).toFixed(2)]);
+
+    const csvContent = 'data:text/csv;charset=utf-8,' + [headers.join(','), ...rows.map(r => r.join(','))].join('\n');
+    const encodedUri = encodeURI(csvContent);
+    const link = document.createElement('a');
+    link.setAttribute('href', encodedUri);
+    link.setAttribute('download', `MediFlow_Financial_Report_${reconciliation.date}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
 
   useEffect(() => {
     loadCashierData();
@@ -1123,21 +1167,46 @@ export default function CashierPage() {
 
             {/* Transactions Journal */}
             <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-5">
-              <div className="flex items-center justify-between mb-4">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-4">
                 <div>
                   <h3 className="text-sm font-bold text-slate-800 uppercase tracking-wide">
                     Cashier Financial Journal (Audit Trail)
                   </h3>
-                  <p className="text-xs text-slate-500">Date: {reconciliation?.date || new Date().toISOString().split('T')[0]}</p>
+                  <p className="text-xs text-slate-500">Date: {reconciliation?.date || reconDate}</p>
                 </div>
 
-                <button
-                  onClick={() => window.print()}
-                  className="px-4 py-2 bg-teal-800 hover:bg-teal-700 text-white rounded-lg text-xs font-bold flex items-center space-x-1.5 shadow"
-                >
-                  <Printer className="w-4 h-4" />
-                  <span>Print Z-Report</span>
-                </button>
+                <div className="flex flex-wrap items-center gap-2">
+                  <div className="flex items-center gap-1.5 bg-slate-50 border border-slate-300 rounded-lg px-2.5 py-1 text-xs">
+                    <Calendar className="w-3.5 h-3.5 text-slate-500" />
+                    <span className="text-[11px] font-bold text-slate-600">Report Date:</span>
+                    <input
+                      type="date"
+                      value={reconDate}
+                      onChange={(e) => {
+                        setReconDate(e.target.value);
+                        fetchReconciliationForDate(e.target.value);
+                      }}
+                      className="bg-transparent text-xs font-semibold text-slate-800 focus:outline-none cursor-pointer"
+                    />
+                  </div>
+
+                  <button
+                    onClick={handleExportReconciliationCsv}
+                    className="px-3 py-2 bg-emerald-700 hover:bg-emerald-800 text-white rounded-lg text-xs font-bold flex items-center space-x-1.5 shadow transition"
+                    title="Download complete transaction journal as CSV spreadsheet"
+                  >
+                    <FileSpreadsheet className="w-4 h-4" />
+                    <span>Export CSV</span>
+                  </button>
+
+                  <button
+                    onClick={() => window.print()}
+                    className="px-3.5 py-2 bg-teal-800 hover:bg-teal-700 text-white rounded-lg text-xs font-bold flex items-center space-x-1.5 shadow transition"
+                  >
+                    <Printer className="w-4 h-4" />
+                    <span>Print Z-Report</span>
+                  </button>
+                </div>
               </div>
 
               <div className="border border-slate-200 rounded-lg overflow-hidden">

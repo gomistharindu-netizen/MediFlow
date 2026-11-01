@@ -134,4 +134,28 @@ export class ApiClient {
   public static delete<T = any>(endpoint: string): Promise<T> {
     return this.request<T>(endpoint, { method: 'DELETE' });
   }
+
+  public static async upload<T = any>(endpoint: string, formData: FormData): Promise<T> {
+    const url = `${API_BASE_URL}${endpoint.startsWith('/') ? endpoint : `/${endpoint}`}`;
+    const headers: Record<string, string> = {
+      'Accept': 'application/json',
+      'X-Tenant': this.getTenant(),
+    };
+    const token = this.getToken();
+    if (token) {
+      headers['Authorization'] = `Bearer ${token}`;
+    }
+
+    const response = await fetch(url, {
+      method: 'POST',
+      headers,
+      body: formData,
+    });
+
+    const data = await response.json().catch(() => null);
+    if (!response.ok) {
+      throw new Error(data?.message || `Upload failed with status ${response.status}`);
+    }
+    return data;
+  }
 }

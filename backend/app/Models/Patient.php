@@ -7,6 +7,8 @@ use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\SoftDeletes;
+// Fix #1: Visit model import added (was missing — caused implicit class resolution)
+use App\Models\Visit;
 
 class Patient extends Model
 {

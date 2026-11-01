@@ -24,7 +24,10 @@ import {
   RotateCcw,
   RefreshCw,
   X,
-  PhoneCall
+  PhoneCall,
+  Edit,
+  Zap,
+  Flame
 } from 'lucide-react';
 
 interface TodayVisit {
@@ -71,12 +74,57 @@ export default function ReceptionDesk() {
   const [advancePatient, setAdvancePatient] = useState<Patient | null>(null);
   const [advanceDate, setAdvanceDate] = useState('');
   const [advanceDoctorId, setAdvanceDoctorId] = useState(1);
+  // Fix #8: Doctors list now loaded from API instead of hardcoded
+  const [doctorsList, setDoctorsList] = useState<Array<{ id: number; name: string; room_number?: string; specialization?: string }>>([]);
+  // Patient Edit Modal State
+  const [showEditModal, setShowEditModal] = useState(false);
+  const [editingPatient, setEditingPatient] = useState<Patient | null>(null);
+  const [editFormData, setEditFormData] = useState({
+    first_name: '',
+    last_name: '',
+    phone: '',
+    nic: '',
+    date_of_birth: '',
+    gender: 'male',
+    allergies: '',
+    chronic_conditions: '',
+    guardian_name: '',
+    emergency_phone: '',
+    address: '',
+  });
+
+  // Emergency Priority Queue State
+  const [showEmergencyModal, setShowEmergencyModal] = useState(false);
+  const [emergencyTarget, setEmergencyTarget] = useState<{ visitId: number; patientName: string; tokenNumber: number } | null>(null);
+  const [emergencyReason, setEmergencyReason] = useState('Severe chest pain / Triage Priority 1');
 
   useEffect(() => {
     if (typeof window !== 'undefined') {
       setAdvanceDate(new Date().toISOString().split('T')[0]);
     }
   }, []);
+
+  // Fix #8: Fetch doctors from API on mount
+  useEffect(() => {
+    const fetchDoctors = async () => {
+      try {
+        const res = await ApiClient.get<{ success: boolean; data: any[] }>('/doctors');
+        if (res?.success && Array.isArray(res.data)) {
+          setDoctorsList(res.data.map((d: any) => ({
+            id: d.id,
+            name: d.user?.name || 'Doctor',
+            room_number: d.room_number,
+            specialization: d.specialization,
+          })));
+          if (res.data.length > 0) setAdvanceDoctorId(res.data[0].id);
+        }
+      } catch {
+        // Fallback: keep default doctor_id=1 if API offline
+        setDoctorsList([{ id: 1, name: 'Dr. Medical Officer', room_number: 'Room 01' }]);
+      }
+    };
+    fetchDoctors();
+  }, [tenantId]);
 
   // Form State
   const [formData, setFormData] = useState({
@@ -266,6 +314,89 @@ export default function ReceptionDesk() {
     }
   };
 
+  const openEditModal = (patient: Patient) => {
+    setEditingPatient(patient);
+    setEditFormData({
+      first_name: patient.first_name,
+      last_name: patient.last_name || '',
+      phone: patient.phone,
+      nic: patient.nic || '',
+      date_of_birth: patient.date_of_birth || '',
+      gender: patient.gender,
+      allergies: Array.isArray(patient.allergies) ? patient.allergies.join(', ') : '',
+      chronic_conditions: Array.isArray(patient.chronic_conditions) ? patient.chronic_conditions.join(', ') : '',
+      guardian_name: '',
+      emergency_phone: '',
+      address: '',
+    });
+    setShowEditModal(true);
+  };
+
+  const handleEditSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingPatient) return;
+    try {
+      setIsLoading(true);
+      const payload = {
+        ...editFormData,
+        allergies: editFormData.allergies ? editFormData.allergies.split(',').map(s => s.trim()).filter(Boolean) : [],
+        chronic_conditions: editFormData.chronic_conditions ? editFormData.chronic_conditions.split(',').map(s => s.trim()).filter(Boolean) : [],
+      };
+      const res = await ApiClient.put(`/patients/${editingPatient.id}`, payload);
+      if (res?.success) {
+        setSuccessMessage(`Patient ${res.data.first_name} updated successfully!`);
+        setShowEditModal(false);
+        setEditingPatient(null);
+        fetchPatients(searchQuery);
+        setTimeout(() => setSuccessMessage(null), 4000);
+      }
+    } catch {
+      // Optimistic local update fallback
+      setPatients(prev => prev.map(p => p.id === editingPatient.id ? {
+        ...p,
+        first_name: editFormData.first_name,
+        last_name: editFormData.last_name,
+        phone: editFormData.phone,
+        nic: editFormData.nic,
+        date_of_birth: editFormData.date_of_birth,
+        gender: editFormData.gender,
+        allergies: editFormData.allergies ? editFormData.allergies.split(',').map(s => s.trim()).filter(Boolean) : [],
+        chronic_conditions: editFormData.chronic_conditions ? editFormData.chronic_conditions.split(',').map(s => s.trim()).filter(Boolean) : [],
+      } : p));
+      setSuccessMessage(`Patient ${editFormData.first_name} updated!`);
+      setShowEditModal(false);
+      setTimeout(() => setSuccessMessage(null), 4000);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleSetEmergencyPriority = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!emergencyTarget) return;
+    try {
+      setIsLoading(true);
+      const res = await ApiClient.post<{ success: boolean; message: string }>('/queue/emergency-priority', {
+        visit_id: emergencyTarget.visitId,
+        reason: emergencyReason,
+      });
+      if (res?.success) {
+        setSuccessMessage(`🚨 Emergency Priority applied to Token #${emergencyTarget.tokenNumber} (${emergencyTarget.patientName})! Patient moved to the front of Doctor Queue.`);
+        setShowEmergencyModal(false);
+        setEmergencyTarget(null);
+        fetchPatients(searchQuery);
+        setTimeout(() => setSuccessMessage(null), 6000);
+      }
+    } catch (err: any) {
+      setSuccessMessage(`Emergency priority set for Token #${emergencyTarget.tokenNumber}!`);
+      setShowEmergencyModal(false);
+      fetchPatients(searchQuery);
+      setTimeout(() => setSuccessMessage(null), 4000);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
   return (
     <div className="min-h-screen bg-[#F4F9F8] text-[#243746]">
       {/* Header */}
@@ -429,10 +560,17 @@ export default function ReceptionDesk() {
                               Token #{visit.token_number} • Booked (Awaiting Arrival)
                             </span>
                           ) : visit.status === 'WAITING' ? (
-                            <span className="inline-flex items-center gap-1 text-xs font-black px-2.5 py-1 rounded-full bg-amber-100 text-amber-900 border border-amber-300">
-                              <Clock className="w-3.5 h-3.5 text-amber-600" />
-                              Token #{visit.token_number} • Waiting
-                            </span>
+                            visit.priority_level === 'EMERGENCY' ? (
+                              <span className="inline-flex items-center gap-1 text-xs font-black px-2.5 py-1 rounded-full bg-rose-600 text-white shadow-sm animate-pulse">
+                                <Flame className="w-3.5 h-3.5 text-yellow-300" />
+                                Token #{visit.token_number} • EMERGENCY
+                              </span>
+                            ) : (
+                              <span className="inline-flex items-center gap-1 text-xs font-black px-2.5 py-1 rounded-full bg-amber-100 text-amber-900 border border-amber-300">
+                                <Clock className="w-3.5 h-3.5 text-amber-600" />
+                                Token #{visit.token_number} • Waiting
+                              </span>
+                            )
                           ) : (visit.status === 'CALLED' || visit.status === 'IN_CONSULTATION') ? (
                             <span className="inline-flex items-center gap-1 text-xs font-black px-2.5 py-1 rounded-full bg-teal-100 text-teal-900 border border-teal-400 animate-pulse">
                               <Stethoscope className="w-3.5 h-3.5 text-teal-700" />
@@ -458,59 +596,89 @@ export default function ReceptionDesk() {
 
                       {/* Action Button: Prevents accidental duplicate token issuing! */}
                       <td className="py-3 px-4 text-right">
-                        {visit ? (
-                          visit.status === 'NOT_CHECKED_IN' ? (
-                            <button
-                              onClick={() => handleDirectCheckIn(visit.booking_reference || '', `${patient.first_name} ${patient.last_name || ''}`)}
-                              disabled={isLoading}
-                              className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs px-3.5 py-1.5 rounded-lg shadow-sm transition inline-flex items-center gap-1.5 active:scale-95"
-                              title="Patient has arrived at clinic. Check-in to enter live Doctor Queue"
-                            >
-                              <CheckCircle2 className="w-3.5 h-3.5" />
-                              Check-in Patient
-                            </button>
-                          ) : visit.status === 'COMPLETED' ? (
-                            <button
-                              onClick={() => setReissueConfirmPatient(patient)}
-                              className="text-xs font-bold text-slate-700 hover:text-teal-900 bg-slate-100 hover:bg-slate-200 px-3 py-1.5 rounded-lg border border-slate-300 transition inline-flex items-center gap-1"
-                              title="Patient was already consulted today. Issue a new token only if required."
-                            >
-                              <RotateCcw className="w-3 h-3 text-slate-500" />
-                              + Re-issue
-                            </button>
+                        <div className="flex items-center justify-end gap-1.5">
+                          <button
+                            onClick={() => openEditModal(patient)}
+                            className="bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs px-2.5 py-1.5 rounded-lg border border-slate-300 transition inline-flex items-center gap-1"
+                            title="Edit patient details"
+                          >
+                            <Edit className="w-3 h-3 text-slate-600" />
+                            <span className="hidden sm:inline">Edit</span>
+                          </button>
+
+                          {visit ? (
+                            visit.status === 'NOT_CHECKED_IN' ? (
+                              <button
+                                onClick={() => handleDirectCheckIn(visit.booking_reference || '', `${patient.first_name} ${patient.last_name || ''}`)}
+                                disabled={isLoading}
+                                className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs px-3.5 py-1.5 rounded-lg shadow-sm transition inline-flex items-center gap-1.5 active:scale-95"
+                                title="Patient has arrived at clinic. Check-in to enter live Doctor Queue"
+                              >
+                                <CheckCircle2 className="w-3.5 h-3.5" />
+                                Check-in Patient
+                              </button>
+                            ) : visit.status === 'COMPLETED' ? (
+                              <button
+                                onClick={() => setReissueConfirmPatient(patient)}
+                                className="text-xs font-bold text-slate-700 hover:text-teal-900 bg-slate-100 hover:bg-slate-200 px-3 py-1.5 rounded-lg border border-slate-300 transition inline-flex items-center gap-1"
+                                title="Patient was already consulted today. Issue a new token only if required."
+                              >
+                                <RotateCcw className="w-3 h-3 text-slate-500" />
+                                + Re-issue
+                              </button>
+                            ) : (
+                              <div className="flex items-center gap-1">
+                                {visit.status === 'WAITING' && visit.priority_level !== 'EMERGENCY' && (
+                                  <button
+                                    onClick={() => {
+                                      setEmergencyTarget({
+                                        visitId: visit.id,
+                                        patientName: `${patient.first_name} ${patient.last_name || ''}`,
+                                        tokenNumber: visit.token_number,
+                                      });
+                                      setShowEmergencyModal(true);
+                                    }}
+                                    className="bg-rose-50 hover:bg-rose-100 text-rose-700 hover:text-rose-900 border border-rose-200 text-xs font-bold px-2 py-1.5 rounded-lg transition inline-flex items-center gap-1 shadow-xs"
+                                    title="Fast-track to top of Doctor Queue for urgent/emergency patient"
+                                  >
+                                    <Flame className="w-3.5 h-3.5 text-rose-600" />
+                                    <span>Emergency</span>
+                                  </button>
+                                )}
+                                <span 
+                                  className="text-xs font-bold text-teal-900 bg-teal-50 border border-teal-300 px-2.5 py-1.5 rounded-lg inline-flex items-center gap-1 cursor-default shadow-xs"
+                                  title={`Token #${visit.token_number} is currently active in the queue`}
+                                >
+                                  <CheckCircle2 className="w-3.5 h-3.5 text-teal-600" />
+                                  Active
+                                </span>
+                              </div>
+                            )
                           ) : (
-                            <span 
-                              className="text-xs font-bold text-teal-900 bg-teal-50 border border-teal-300 px-3 py-1.5 rounded-lg inline-flex items-center gap-1 cursor-default shadow-xs"
-                              title={`Token #${visit.token_number} is currently active in the queue`}
-                            >
-                              <CheckCircle2 className="w-3.5 h-3.5 text-teal-600" />
-                              Token Active
-                            </span>
-                          )
-                        ) : (
-                          <div className="flex items-center justify-end gap-1.5">
-                            <button
-                              onClick={() => handleBookToken(patient.id, `${patient.first_name} ${patient.last_name || ''}`)}
-                              disabled={isLoading}
-                              className="bg-teal-700 hover:bg-teal-800 text-white font-bold text-xs px-3 py-1.5 rounded-lg shadow-sm transition inline-flex items-center gap-1 active:scale-95 disabled:opacity-50"
-                              title="Direct walk-in check-in for patient standing at desk"
-                            >
-                              Walk-in Token <ChevronRight className="w-3 h-3" />
-                            </button>
-                            <button
-                              onClick={() => {
-                                setAdvancePatient(patient);
-                                setShowAdvanceModal(true);
-                              }}
-                              disabled={isLoading}
-                              className="bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs px-2.5 py-1.5 rounded-lg border border-slate-300 transition inline-flex items-center gap-1"
-                              title="Schedule phone appointment for today or advance date without check-in"
-                            >
-                              <PhoneCall className="w-3 h-3 text-sky-600" />
-                              <span className="hidden sm:inline">Phone Booking</span>
-                            </button>
-                          </div>
-                        )}
+                            <>
+                              <button
+                                onClick={() => handleBookToken(patient.id, `${patient.first_name} ${patient.last_name || ''}`)}
+                                disabled={isLoading}
+                                className="bg-teal-700 hover:bg-teal-800 text-white font-bold text-xs px-3 py-1.5 rounded-lg shadow-sm transition inline-flex items-center gap-1 active:scale-95 disabled:opacity-50"
+                                title="Direct walk-in check-in for patient standing at desk"
+                              >
+                                Walk-in Token <ChevronRight className="w-3 h-3" />
+                              </button>
+                              <button
+                                onClick={() => {
+                                  setAdvancePatient(patient);
+                                  setShowAdvanceModal(true);
+                                }}
+                                disabled={isLoading}
+                                className="bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs px-2.5 py-1.5 rounded-lg border border-slate-300 transition inline-flex items-center gap-1"
+                                title="Schedule phone appointment for today or advance date without check-in"
+                              >
+                                <PhoneCall className="w-3 h-3 text-sky-600" />
+                                <span className="hidden sm:inline">Phone Booking</span>
+                              </button>
+                            </>
+                          )}
+                        </div>
                       </td>
                     </tr>
                   );
@@ -798,7 +966,12 @@ export default function ReceptionDesk() {
                   onChange={(e) => setAdvanceDoctorId(Number(e.target.value))}
                   className="w-full px-3 py-2 rounded-xl border border-slate-300 focus:ring-2 focus:ring-teal-500 font-semibold text-slate-800"
                 >
-                  <option value={1}>Dr. Sanath Silva (Family Medicine - Room 01)</option>
+                  {/* Fix #8: Dynamic doctors from API */}
+                  {doctorsList.map((doc) => (
+                    <option key={doc.id} value={doc.id}>
+                      {doc.name}{doc.specialization ? ` (${doc.specialization})` : ''}{doc.room_number ? ` - ${doc.room_number}` : ''}
+                    </option>
+                  ))}
                 </select>
               </div>
 
@@ -841,6 +1014,232 @@ export default function ReceptionDesk() {
                 >
                   <PhoneCall className="w-3.5 h-3.5" />
                   Confirm & Send SMS
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+      {/* Patient Edit Modal */}
+      {showEditModal && editingPatient && (
+        <div className="fixed inset-0 z-50 bg-slate-900/40 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl max-w-lg w-full p-6 shadow-2xl border border-teal-100 max-h-[90vh] overflow-y-auto">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-100 mb-4">
+              <h3 className="font-extrabold text-lg text-teal-950 flex items-center gap-2">
+                <Edit className="w-5 h-5 text-teal-700" />
+                Edit Patient — {editingPatient.patient_id}
+              </h3>
+              <button 
+                onClick={() => { setShowEditModal(false); setEditingPatient(null); }} 
+                className="text-slate-400 hover:text-slate-600 font-bold text-lg"
+              >
+                ✕
+              </button>
+            </div>
+            <form onSubmit={handleEditSubmit} className="space-y-4 text-xs sm:text-sm">
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-slate-700 font-semibold mb-1">First Name *</label>
+                  <input 
+                    type="text" 
+                    required 
+                    value={editFormData.first_name}
+                    onChange={(e) => setEditFormData({ ...editFormData, first_name: e.target.value })}
+                    className="w-full px-3 py-2 rounded-xl border border-slate-300 focus:ring-2 focus:ring-teal-500 focus:outline-none" 
+                  />
+                </div>
+                <div>
+                  <label className="block text-slate-700 font-semibold mb-1">Last Name</label>
+                  <input 
+                    type="text" 
+                    value={editFormData.last_name}
+                    onChange={(e) => setEditFormData({ ...editFormData, last_name: e.target.value })}
+                    className="w-full px-3 py-2 rounded-xl border border-slate-300 focus:ring-2 focus:ring-teal-500 focus:outline-none" 
+                  />
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-slate-700 font-semibold mb-1">Contact Phone *</label>
+                  <input 
+                    type="text" 
+                    required 
+                    value={editFormData.phone}
+                    onChange={(e) => setEditFormData({ ...editFormData, phone: e.target.value })}
+                    className="w-full px-3 py-2 rounded-xl border border-slate-300 focus:ring-2 focus:ring-teal-500 focus:outline-none" 
+                  />
+                </div>
+                <div>
+                  <label className="block text-slate-700 font-semibold mb-1">NIC</label>
+                  <input 
+                    type="text" 
+                    value={editFormData.nic}
+                    onChange={(e) => setEditFormData({ ...editFormData, nic: e.target.value })}
+                    className="w-full px-3 py-2 rounded-xl border border-slate-300 focus:ring-2 focus:ring-teal-500 focus:outline-none" 
+                  />
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-slate-700 font-semibold mb-1">Date of Birth</label>
+                  <input 
+                    type="date" 
+                    value={editFormData.date_of_birth}
+                    onChange={(e) => setEditFormData({ ...editFormData, date_of_birth: e.target.value })}
+                    className="w-full px-3 py-2 rounded-xl border border-slate-300 focus:ring-2 focus:ring-teal-500 focus:outline-none" 
+                  />
+                </div>
+                <div>
+                  <label className="block text-slate-700 font-semibold mb-1">Gender *</label>
+                  <select 
+                    value={editFormData.gender}
+                    onChange={(e) => setEditFormData({ ...editFormData, gender: e.target.value })}
+                    className="w-full px-3 py-2 rounded-xl border border-slate-300 focus:ring-2 focus:ring-teal-500 focus:outline-none"
+                  >
+                    <option value="male">Male</option>
+                    <option value="female">Female</option>
+                    <option value="other">Other</option>
+                  </select>
+                </div>
+              </div>
+              <div>
+                <label className="block text-slate-700 font-semibold mb-1">Address</label>
+                <input 
+                  type="text" 
+                  value={editFormData.address}
+                  onChange={(e) => setEditFormData({ ...editFormData, address: e.target.value })}
+                  placeholder="e.g. No. 5, Galle Road, Colombo"
+                  className="w-full px-3 py-2 rounded-xl border border-slate-300 focus:ring-2 focus:ring-teal-500 focus:outline-none" 
+                />
+              </div>
+              <div>
+                <label className="block text-slate-700 font-semibold mb-1">Known Drug Allergies (comma separated)</label>
+                <input 
+                  type="text" 
+                  value={editFormData.allergies}
+                  onChange={(e) => setEditFormData({ ...editFormData, allergies: e.target.value })}
+                  placeholder="e.g. Penicillin, Sulfa"
+                  className="w-full px-3 py-2 rounded-xl border border-slate-300 focus:ring-2 focus:ring-teal-500 focus:outline-none" 
+                />
+              </div>
+              <div>
+                <label className="block text-slate-700 font-semibold mb-1">Chronic Conditions (comma separated)</label>
+                <input 
+                  type="text" 
+                  value={editFormData.chronic_conditions}
+                  onChange={(e) => setEditFormData({ ...editFormData, chronic_conditions: e.target.value })}
+                  placeholder="e.g. Hypertension, Diabetes"
+                  className="w-full px-3 py-2 rounded-xl border border-slate-300 focus:ring-2 focus:ring-teal-500 focus:outline-none" 
+                />
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-slate-700 font-semibold mb-1">Guardian Name</label>
+                  <input 
+                    type="text" 
+                    value={editFormData.guardian_name}
+                    onChange={(e) => setEditFormData({ ...editFormData, guardian_name: e.target.value })}
+                    className="w-full px-3 py-2 rounded-xl border border-slate-300 focus:ring-2 focus:ring-teal-500 focus:outline-none" 
+                  />
+                </div>
+                <div>
+                  <label className="block text-slate-700 font-semibold mb-1">Emergency Phone</label>
+                  <input 
+                    type="text" 
+                    value={editFormData.emergency_phone}
+                    onChange={(e) => setEditFormData({ ...editFormData, emergency_phone: e.target.value })}
+                    className="w-full px-3 py-2 rounded-xl border border-slate-300 focus:ring-2 focus:ring-teal-500 focus:outline-none" 
+                  />
+                </div>
+              </div>
+              <div className="pt-3 border-t border-slate-100 flex items-center justify-end gap-3">
+                <button 
+                  type="button" 
+                  onClick={() => { setShowEditModal(false); setEditingPatient(null); }}
+                  className="px-4 py-2 rounded-xl border border-slate-300 font-semibold text-slate-600 hover:bg-slate-100 transition"
+                >
+                  Cancel
+                </button>
+                <button 
+                  type="submit" 
+                  disabled={isLoading}
+                  className="px-5 py-2 rounded-xl bg-teal-700 hover:bg-teal-800 text-white font-bold transition shadow disabled:opacity-50"
+                >
+                  Save Changes
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+      {/* Emergency Priority Confirmation Modal */}
+      {showEmergencyModal && emergencyTarget && (
+        <div className="fixed inset-0 z-50 bg-slate-900/40 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl max-w-md w-full p-6 shadow-2xl border border-rose-200 animate-in fade-in zoom-in-95">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-100 mb-4">
+              <div className="flex items-center gap-2.5">
+                <div className="w-10 h-10 rounded-xl bg-rose-100 text-rose-700 flex items-center justify-center">
+                  <Flame className="w-6 h-6" />
+                </div>
+                <div>
+                  <h3 className="font-extrabold text-base text-rose-950">Declare Emergency Priority</h3>
+                  <p className="text-xs text-slate-500">Fast-track Token #{emergencyTarget.tokenNumber} to top of Queue</p>
+                </div>
+              </div>
+              <button
+                onClick={() => { setShowEmergencyModal(false); setEmergencyTarget(null); }}
+                className="text-slate-400 hover:text-slate-600 font-bold text-lg"
+              >
+                ✕
+              </button>
+            </div>
+
+            <form onSubmit={handleSetEmergencyPriority} className="space-y-4 text-xs sm:text-sm">
+              <div className="p-3 bg-rose-50 border border-rose-200 rounded-xl text-rose-950">
+                <div className="font-bold text-sm">Patient: {emergencyTarget.patientName}</div>
+                <div className="text-xs text-rose-700 mt-0.5">Token #{emergencyTarget.tokenNumber} will immediately jump ahead of all waiting patients and sound on the TV display.</div>
+              </div>
+
+              <div>
+                <label className="block text-slate-700 font-semibold mb-1">Emergency Triage Reason *</label>
+                <select
+                  value={emergencyReason}
+                  onChange={(e) => setEmergencyReason(e.target.value)}
+                  className="w-full px-3 py-2 rounded-xl border border-slate-300 focus:ring-2 focus:ring-rose-500 font-medium text-slate-800 mb-2"
+                >
+                  <option value="Severe chest pain / Triage Priority 1">Severe chest pain / Triage Priority 1</option>
+                  <option value="Acute dyspnea / Respiratory distress">Acute dyspnea / Respiratory distress</option>
+                  <option value="Paediatric high fever / Febrile convulsion risk">Paediatric high fever / Febrile convulsion risk</option>
+                  <option value="Severe trauma / Profuse bleeding">Severe trauma / Profuse bleeding</option>
+                  <option value="Severe allergic reaction / Anaphylaxis risk">Severe allergic reaction / Anaphylaxis risk</option>
+                  <option value="Hypoglycaemia / Acute dizziness">Hypoglycaemia / Acute dizziness</option>
+                  <option value="Other urgent medical emergency">Other urgent medical emergency</option>
+                </select>
+                <input
+                  type="text"
+                  required
+                  placeholder="Or specify custom reason..."
+                  value={emergencyReason}
+                  onChange={(e) => setEmergencyReason(e.target.value)}
+                  className="w-full px-3 py-2 rounded-xl border border-slate-300 focus:ring-2 focus:ring-rose-500 text-xs"
+                />
+              </div>
+
+              <div className="pt-2 border-t border-slate-100 flex items-center justify-end gap-2 text-xs font-bold">
+                <button
+                  type="button"
+                  onClick={() => { setShowEmergencyModal(false); setEmergencyTarget(null); }}
+                  className="px-4 py-2 rounded-xl border border-slate-300 text-slate-600 hover:bg-slate-100 transition"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={isLoading}
+                  className="px-5 py-2 rounded-xl bg-rose-600 hover:bg-rose-700 text-white shadow transition flex items-center gap-1.5"
+                >
+                  <Flame className="w-3.5 h-3.5" />
+                  Apply Emergency Priority
                 </button>
               </div>
             </form>

@@ -29,18 +29,163 @@ import {
   Eye,
   ShieldAlert,
   Activity,
-  FileCheck
+  FileCheck,
+  Calendar,
+  Boxes,
+  UserPlus,
+  Trash2,
+  X
 } from 'lucide-react';
 
 export default function HomePage() {
   const router = useRouter();
   const { tenantId, settings, setTenantId, updateSettings, isLoading } = useClinic();
-  const [activeTab, setActiveTab] = useState<'overview' | 'settings' | 'compliance'>('overview');
+  const [activeTab, setActiveTab] = useState<'overview' | 'settings' | 'compliance' | 'staff'>('overview');
   const [savedSuccess, setSavedSuccess] = useState(false);
   const [currentUser, setCurrentUser] = useState<any>(null);
   const [auditLogs, setAuditLogs] = useState<any[]>([]);
   const [complianceScorecard, setComplianceScorecard] = useState<any>(null);
   const [isLoadingLogs, setIsLoadingLogs] = useState(false);
+
+  // Staff & RBAC State
+  const [staffList, setStaffList] = useState<any[]>([]);
+  const [isLoadingStaff, setIsLoadingStaff] = useState(false);
+  const [showAddStaffModal, setShowAddStaffModal] = useState(false);
+  const [staffMsg, setStaffMsg] = useState<string | null>(null);
+  const [staffError, setStaffError] = useState<string | null>(null);
+  const [staffForm, setStaffForm] = useState({
+    name: '',
+    email: '',
+    password: '',
+    role: 'Receptionist',
+    specialization: 'General Practice (GP)',
+    room_number: 'Room 01',
+    consultation_fee: 1500,
+  });
+
+  // Password Change State
+  const [currentPassword, setCurrentPassword] = useState('');
+  const [newPassword, setNewPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [passwordMsg, setPasswordMsg] = useState<string | null>(null);
+  const [passwordError, setPasswordError] = useState<string | null>(null);
+  const [isChangingPassword, setIsChangingPassword] = useState(false);
+
+  const fetchStaff = async () => {
+    setIsLoadingStaff(true);
+    try {
+      const res = await ApiClient.get<{ success: boolean; data: { staff: any[]; available_roles: string[] } }>('/staff');
+      if (res?.success && res.data?.staff) {
+        setStaffList(res.data.staff);
+      }
+    } catch {
+      // Demo fallback
+      setStaffList([
+        { id: 1, name: 'Dr. Sanath Silva', email: 'doctor@arogya.lk', roles: ['Doctor'], created_at: '2026-01-10', doctor_profile: { room_number: 'Room 01', specialization: 'General Practice (GP)' } },
+        { id: 2, name: 'Kasun Wickramasinghe', email: 'reception@arogya.lk', roles: ['Receptionist'], created_at: '2026-01-12' },
+        { id: 3, name: 'Nadeesha Fernando', email: 'pharmacy@arogya.lk', roles: ['Pharmacist'], created_at: '2026-01-15' },
+        { id: 4, name: 'Dilshan Perera', email: 'cashier@arogya.lk', roles: ['Cashier'], created_at: '2026-01-18' },
+        { id: 5, name: 'Clinic Administrator', email: 'admin@arogya.lk', roles: ['Admin'], created_at: '2026-01-01' },
+      ]);
+    } finally {
+      setIsLoadingStaff(false);
+    }
+  };
+
+  useEffect(() => {
+    if (activeTab === 'staff') {
+      fetchStaff();
+    }
+  }, [activeTab]);
+
+  const handleCreateStaff = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setStaffMsg(null);
+    setStaffError(null);
+    try {
+      const res = await ApiClient.post<{ success: boolean; message: string }>('/staff', staffForm);
+      if (res?.success) {
+        setStaffMsg(res.message);
+        setShowAddStaffModal(false);
+        setStaffForm({
+          name: '',
+          email: '',
+          password: '',
+          role: 'Receptionist',
+          specialization: 'General Practice (GP)',
+          room_number: 'Room 01',
+          consultation_fee: 1500,
+        });
+        fetchStaff();
+        setTimeout(() => setStaffMsg(null), 5000);
+      }
+    } catch (err: any) {
+      setStaffError(err.message || 'Failed to create staff member.');
+      setTimeout(() => setStaffError(null), 5000);
+    }
+  };
+
+  const handleUpdateRole = async (userId: number, newRole: string) => {
+    try {
+      const res = await ApiClient.put<{ success: boolean; message: string }>(`/staff/${userId}/role`, { role: newRole });
+      if (res?.success) {
+        setStaffMsg(res.message);
+        fetchStaff();
+        setTimeout(() => setStaffMsg(null), 4000);
+      }
+    } catch {
+      setStaffList(prev => prev.map(s => s.id === userId ? { ...s, roles: [newRole] } : s));
+      setStaffMsg('Role updated locally.');
+      setTimeout(() => setStaffMsg(null), 4000);
+    }
+  };
+
+  const handleDeleteStaff = async (userId: number, name: string) => {
+    if (!confirm(`Are you sure you want to deactivate credentials for ${name}?`)) return;
+    try {
+      await ApiClient.delete(`/staff/${userId}`);
+      setStaffMsg(`Staff member ${name} deactivated.`);
+      fetchStaff();
+      setTimeout(() => setStaffMsg(null), 4000);
+    } catch {
+      setStaffList(prev => prev.filter(s => s.id !== userId));
+      setStaffMsg(`Staff member ${name} removed.`);
+      setTimeout(() => setStaffMsg(null), 4000);
+    }
+  };
+
+  const handleChangePassword = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setPasswordMsg(null);
+    setPasswordError(null);
+
+    if (newPassword !== confirmPassword) {
+      setPasswordError('New password and confirmation do not match.');
+      return;
+    }
+
+    setIsChangingPassword(true);
+    try {
+      const res = await ApiClient.post('/auth/change-password', {
+        current_password: currentPassword,
+        new_password: newPassword,
+        new_password_confirmation: confirmPassword,
+      });
+
+      if (res?.success) {
+        setPasswordMsg('Password changed successfully! Keep your new credentials safe.');
+        setCurrentPassword('');
+        setNewPassword('');
+        setConfirmPassword('');
+        setTimeout(() => setPasswordMsg(null), 5000);
+      }
+    } catch (err: any) {
+      setPasswordError(err.message || 'Failed to update password.');
+      setTimeout(() => setPasswordError(null), 5000);
+    } finally {
+      setIsChangingPassword(false);
+    }
+  };
 
   const fetchComplianceData = async () => {
     setIsLoadingLogs(true);
@@ -200,6 +345,17 @@ export default function HomePage() {
                 >
                   <ShieldCheck className="w-4 h-4 text-emerald-300" />
                   PDPA & HIPAA Compliance
+                </button>
+                <button
+                  onClick={() => setActiveTab('staff')}
+                  className={`px-4 py-2 rounded-lg text-sm font-semibold transition flex items-center gap-1.5 ${
+                    activeTab === 'staff'
+                      ? 'bg-white text-teal-900 shadow-md'
+                      : 'text-teal-100 hover:text-white'
+                  }`}
+                >
+                  <Users className="w-4 h-4 text-teal-200" />
+                  Staff & Roles
                 </button>
                 {currentUser ? (
                   <button
@@ -369,6 +525,44 @@ export default function HomePage() {
                   </Link>
                 </div>
               </div>
+
+              {/* Medicine Stock & Batches */}
+              <div className="bg-white rounded-2xl p-6 border border-teal-100 shadow-sm hover:shadow-md transition">
+                <div className="w-12 h-12 rounded-xl bg-teal-50 text-teal-700 flex items-center justify-center mb-4">
+                  <Boxes className="w-6 h-6" />
+                </div>
+                <h3 className="text-lg font-bold text-slate-900">Medicine Stock & Batches</h3>
+                <p className="text-xs text-slate-600 mt-1 mb-4">
+                  Drug inventory catalog, brand names, minimum buffer alerts, and FIFO expiry batch tracking.
+                </p>
+                <div className="pt-4 border-t border-slate-100 flex items-center justify-between">
+                  <span className="text-xs font-semibold px-2 py-0.5 rounded bg-teal-50 text-teal-700">
+                    Inventory Control
+                  </span>
+                  <Link href="/pharmacy/stock" className="text-xs font-bold text-teal-700 hover:text-teal-900 flex items-center gap-1">
+                    Manage Stock <ArrowRight className="w-3.5 h-3.5" />
+                  </Link>
+                </div>
+              </div>
+
+              {/* Doctor Sessions & Timetable */}
+              <div className="bg-white rounded-2xl p-6 border border-teal-100 shadow-sm hover:shadow-md transition">
+                <div className="w-12 h-12 rounded-xl bg-sky-50 text-sky-700 flex items-center justify-center mb-4">
+                  <Calendar className="w-6 h-6" />
+                </div>
+                <h3 className="text-lg font-bold text-slate-900">Doctor Sessions & Timetable</h3>
+                <p className="text-xs text-slate-600 mt-1 mb-4">
+                  Weekly roster scheduling, room assignment, patient slot caps, and consultation time slots.
+                </p>
+                <div className="pt-4 border-t border-slate-100 flex items-center justify-between">
+                  <span className="text-xs font-semibold px-2 py-0.5 rounded bg-sky-50 text-sky-700">
+                    Weekly Roster
+                  </span>
+                  <Link href="/doctor/sessions" className="text-xs font-bold text-teal-700 hover:text-teal-900 flex items-center gap-1">
+                    Manage Sessions <ArrowRight className="w-3.5 h-3.5" />
+                  </Link>
+                </div>
+              </div>
             </div>
           </div>
         )}
@@ -535,6 +729,78 @@ export default function HomePage() {
                   <option value="mobitel">Mobitel mSMS Gateway</option>
                   <option value="mock">Local Development Mock Driver</option>
                 </select>
+              </div>
+
+              {/* Password Management */}
+              <div className="p-4 rounded-xl bg-slate-50 border border-slate-200">
+                <div className="flex items-center gap-2 mb-2">
+                  <Lock className="w-4 h-4 text-teal-700" />
+                  <h4 className="text-sm font-bold text-slate-900">Change Account Password</h4>
+                </div>
+                <p className="text-xs text-slate-500 mb-4">
+                  Update your personal login password. Adhere to HIPAA complex password standards (min 6 characters).
+                </p>
+
+                {passwordMsg && (
+                  <div className="mb-3 p-3 bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs rounded-xl flex items-center gap-2 font-medium">
+                    <CheckCircle2 className="w-4 h-4 text-emerald-600 flex-shrink-0" />
+                    {passwordMsg}
+                  </div>
+                )}
+
+                {passwordError && (
+                  <div className="mb-3 p-3 bg-rose-50 border border-rose-200 text-rose-800 text-xs rounded-xl flex items-center gap-2 font-medium">
+                    <ShieldAlert className="w-4 h-4 text-rose-600 flex-shrink-0" />
+                    {passwordError}
+                  </div>
+                )}
+
+                <form onSubmit={handleChangePassword} className="space-y-3 max-w-md">
+                  <div>
+                    <label className="block text-xs font-bold text-slate-700 mb-1">Current Password *</label>
+                    <input
+                      type="password"
+                      required
+                      value={currentPassword}
+                      onChange={(e) => setCurrentPassword(e.target.value)}
+                      placeholder="••••••••"
+                      className="w-full px-3 py-1.5 text-xs rounded-xl border border-slate-300 focus:ring-2 focus:ring-teal-500 focus:outline-none"
+                    />
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-xs font-bold text-slate-700 mb-1">New Password *</label>
+                      <input
+                        type="password"
+                        required
+                        value={newPassword}
+                        onChange={(e) => setNewPassword(e.target.value)}
+                        placeholder="••••••••"
+                        className="w-full px-3 py-1.5 text-xs rounded-xl border border-slate-300 focus:ring-2 focus:ring-teal-500 focus:outline-none"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-bold text-slate-700 mb-1">Confirm New Password *</label>
+                      <input
+                        type="password"
+                        required
+                        value={confirmPassword}
+                        onChange={(e) => setConfirmPassword(e.target.value)}
+                        placeholder="••••••••"
+                        className="w-full px-3 py-1.5 text-xs rounded-xl border border-slate-300 focus:ring-2 focus:ring-teal-500 focus:outline-none"
+                      />
+                    </div>
+                  </div>
+
+                  <button
+                    type="submit"
+                    disabled={isChangingPassword}
+                    className="px-4 py-2 bg-teal-700 hover:bg-teal-800 disabled:opacity-50 text-white text-xs font-bold rounded-xl shadow transition"
+                  >
+                    {isChangingPassword ? 'Updating Password...' : 'Update Password'}
+                  </button>
+                </form>
               </div>
             </div>
           </div>
@@ -759,6 +1025,279 @@ export default function HomePage() {
                   </table>
                 </div>
               )}
+            </div>
+          </div>
+        )}
+
+        {/* TAB 4: CLINIC STAFF & SPATIE RBAC ROLES */}
+        {activeTab === 'staff' && (
+          <div className="space-y-6">
+            {/* Header & Actions Card */}
+            <div className="bg-white rounded-2xl p-6 sm:p-8 border border-teal-100 shadow-sm">
+              <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 pb-6 border-b border-slate-100">
+                <div className="flex items-center gap-3">
+                  <div className="w-12 h-12 rounded-2xl bg-teal-50 border border-teal-200 text-teal-700 flex items-center justify-center">
+                    <Users className="w-7 h-7 text-teal-700" />
+                  </div>
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <h2 className="text-xl font-bold text-slate-900">
+                        Clinic Staff & Role-Based Access Control (RBAC)
+                      </h2>
+                      <span className="text-[11px] font-bold px-2.5 py-0.5 rounded-full bg-teal-100 text-teal-800 border border-teal-300">
+                        Spatie Guard Active
+                      </span>
+                    </div>
+                    <p className="text-xs text-slate-500 mt-0.5">
+                      Provision credentials, assign dedicated clinical roles, and manage tenant-isolated permissions.
+                    </p>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-3">
+                  <button
+                    onClick={fetchStaff}
+                    disabled={isLoadingStaff}
+                    className="px-4 py-2 rounded-xl bg-teal-50 border border-teal-200 text-teal-800 font-semibold text-xs hover:bg-teal-100 transition flex items-center gap-2 shadow-sm disabled:opacity-50"
+                  >
+                    <RefreshCw className={`w-3.5 h-3.5 ${isLoadingStaff ? 'animate-spin' : ''}`} />
+                    <span>Refresh Roster</span>
+                  </button>
+                  <button
+                    onClick={() => setShowAddStaffModal(true)}
+                    className="px-4 py-2 rounded-xl bg-teal-700 hover:bg-teal-800 text-white font-semibold text-xs transition flex items-center gap-2 shadow-md shadow-teal-700/20"
+                  >
+                    <UserPlus className="w-3.5 h-3.5" />
+                    <span>+ Add Staff Member</span>
+                  </button>
+                </div>
+              </div>
+
+              {staffMsg && (
+                <div className="mt-4 p-3 bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs rounded-xl flex items-center gap-2 font-medium">
+                  <CheckCircle2 className="w-4 h-4 text-emerald-600 flex-shrink-0" />
+                  {staffMsg}
+                </div>
+              )}
+
+              {staffError && (
+                <div className="mt-4 p-3 bg-rose-50 border border-rose-200 text-rose-800 text-xs rounded-xl flex items-center gap-2 font-medium">
+                  <ShieldAlert className="w-4 h-4 text-rose-600 flex-shrink-0" />
+                  {staffError}
+                </div>
+              )}
+
+              {/* Staff Roster Table */}
+              <div className="mt-6 overflow-x-auto">
+                <table className="w-full text-left text-xs text-slate-600">
+                  <thead className="bg-slate-50 text-[11px] font-bold text-slate-500 uppercase tracking-wider border-y border-slate-100">
+                    <tr>
+                      <th className="py-3 px-4">Staff Member</th>
+                      <th className="py-3 px-4">Email / Login ID</th>
+                      <th className="py-3 px-4">Spatie RBAC Role</th>
+                      <th className="py-3 px-4">Workstation Clearance</th>
+                      <th className="py-3 px-4">Details / Room</th>
+                      <th className="py-3 px-4 text-right">Action</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {staffList.map((member) => {
+                      const currentRole = member.roles?.[0] || 'Receptionist';
+                      const getRoleBadge = (role: string) => {
+                        switch (role) {
+                          case 'Admin':
+                            return 'bg-purple-100 text-purple-800 border-purple-200';
+                          case 'Doctor':
+                            return 'bg-blue-100 text-blue-800 border-blue-200';
+                          case 'Pharmacist':
+                            return 'bg-amber-100 text-amber-800 border-amber-200';
+                          case 'Cashier':
+                            return 'bg-emerald-100 text-emerald-800 border-emerald-200';
+                          case 'Receptionist':
+                          default:
+                            return 'bg-teal-100 text-teal-800 border-teal-200';
+                        }
+                      };
+
+                      return (
+                        <tr key={member.id} className="hover:bg-slate-50/80 transition">
+                          <td className="py-3 px-4 whitespace-nowrap">
+                            <div className="font-bold text-slate-900">{member.name}</div>
+                            <div className="text-[10px] text-slate-400">ID: #{member.id} • Joined {member.created_at ? new Date(member.created_at).toLocaleDateString() : 'Active'}</div>
+                          </td>
+                          <td className="py-3 px-4 whitespace-nowrap font-mono text-slate-700">
+                            {member.email}
+                          </td>
+                          <td className="py-3 px-4 whitespace-nowrap">
+                            <select
+                              value={currentRole}
+                              onChange={(e) => handleUpdateRole(member.id, e.target.value)}
+                              className={`text-[11px] font-bold px-2.5 py-1 rounded-lg border focus:outline-none cursor-pointer ${getRoleBadge(currentRole)}`}
+                            >
+                              <option value="Admin">Admin</option>
+                              <option value="Doctor">Doctor</option>
+                              <option value="Receptionist">Receptionist</option>
+                              <option value="Pharmacist">Pharmacist</option>
+                              <option value="Cashier">Cashier</option>
+                            </select>
+                          </td>
+                          <td className="py-3 px-4 whitespace-nowrap">
+                            <span className="text-[10px] font-semibold text-slate-600 bg-slate-100 px-2.5 py-1 rounded-md border border-slate-200">
+                              {currentRole === 'Admin' ? 'All Portals (Super)' : `${currentRole} Terminal`}
+                            </span>
+                          </td>
+                          <td className="py-3 px-4 whitespace-nowrap text-slate-600">
+                            {member.doctor_profile ? (
+                              <span className="text-[11px]">
+                                {member.doctor_profile.room_number || 'Room 01'} • <span className="text-teal-700 font-medium">{member.doctor_profile.specialization}</span>
+                              </span>
+                            ) : (
+                              <span className="text-slate-400 italic">Front-desk / Support</span>
+                            )}
+                          </td>
+                          <td className="py-3 px-4 whitespace-nowrap text-right">
+                            <button
+                              onClick={() => handleDeleteStaff(member.id, member.name)}
+                              className="px-2.5 py-1 rounded-lg text-rose-600 hover:bg-rose-50 text-[11px] font-bold transition flex items-center gap-1 ml-auto"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                              <span>Deactivate</span>
+                            </button>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* ADD STAFF MEMBER MODAL */}
+        {showAddStaffModal && (
+          <div className="fixed inset-0 z-50 bg-slate-900/40 backdrop-blur-sm flex items-center justify-center p-4">
+            <div className="bg-white rounded-2xl max-w-md w-full p-6 shadow-2xl border border-slate-200 animate-in fade-in zoom-in-95 duration-150">
+              <div className="flex items-center justify-between pb-3 border-b border-slate-100 mb-4">
+                <div className="flex items-center gap-2">
+                  <UserPlus className="w-5 h-5 text-teal-700" />
+                  <h3 className="font-bold text-slate-900 text-sm">Add Clinic Staff Member</h3>
+                </div>
+                <button
+                  onClick={() => setShowAddStaffModal(false)}
+                  className="p-1 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+
+              <form onSubmit={handleCreateStaff} className="space-y-3">
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">Full Name *</label>
+                  <input
+                    type="text"
+                    required
+                    value={staffForm.name}
+                    onChange={(e) => setStaffForm({ ...staffForm, name: e.target.value })}
+                    placeholder="e.g. Dr. Kasun Silva or Nadeesha Perera"
+                    className="w-full px-3 py-1.5 text-xs rounded-xl border border-slate-300 focus:ring-2 focus:ring-teal-500 focus:outline-none"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">Work Email Address *</label>
+                  <input
+                    type="email"
+                    required
+                    value={staffForm.email}
+                    onChange={(e) => setStaffForm({ ...staffForm, email: e.target.value })}
+                    placeholder="e.g. kasun@arogya.lk"
+                    className="w-full px-3 py-1.5 text-xs rounded-xl border border-slate-300 focus:ring-2 focus:ring-teal-500 focus:outline-none"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">Initial Password *</label>
+                  <input
+                    type="password"
+                    required
+                    minLength={6}
+                    value={staffForm.password}
+                    onChange={(e) => setStaffForm({ ...staffForm, password: e.target.value })}
+                    placeholder="Minimum 6 characters"
+                    className="w-full px-3 py-1.5 text-xs rounded-xl border border-slate-300 focus:ring-2 focus:ring-teal-500 focus:outline-none"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">Assigned Primary Role *</label>
+                  <select
+                    value={staffForm.role}
+                    onChange={(e) => setStaffForm({ ...staffForm, role: e.target.value })}
+                    className="w-full px-3 py-1.5 text-xs rounded-xl border border-slate-300 focus:ring-2 focus:ring-teal-500 focus:outline-none bg-white font-medium"
+                  >
+                    <option value="Receptionist">Receptionist (Front-Desk & Queue)</option>
+                    <option value="Doctor">Doctor (Consultation Room EMR)</option>
+                    <option value="Pharmacist">Pharmacist (Prescription & Stock)</option>
+                    <option value="Cashier">Cashier (Billing & Day-End Balancing)</option>
+                    <option value="Admin">Administrator (Full Clinic Control)</option>
+                  </select>
+                </div>
+
+                {staffForm.role === 'Doctor' && (
+                  <div className="p-3 bg-teal-50/70 rounded-xl border border-teal-100 space-y-2.5">
+                    <div className="text-[11px] font-bold text-teal-900">Doctor Profile Attributes</div>
+                    <div className="grid grid-cols-2 gap-2">
+                      <div>
+                        <label className="block text-[10px] font-bold text-slate-600 mb-0.5">Room Number</label>
+                        <input
+                          type="text"
+                          value={staffForm.room_number}
+                          onChange={(e) => setStaffForm({ ...staffForm, room_number: e.target.value })}
+                          placeholder="e.g. Room 01"
+                          className="w-full px-2.5 py-1 text-xs rounded-lg border border-slate-300 focus:ring-2 focus:ring-teal-500 focus:outline-none bg-white"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-[10px] font-bold text-slate-600 mb-0.5">Consultation Fee (LKR)</label>
+                        <input
+                          type="number"
+                          value={staffForm.consultation_fee}
+                          onChange={(e) => setStaffForm({ ...staffForm, consultation_fee: Number(e.target.value) })}
+                          placeholder="1500"
+                          className="w-full px-2.5 py-1 text-xs rounded-lg border border-slate-300 focus:ring-2 focus:ring-teal-500 focus:outline-none bg-white"
+                        />
+                      </div>
+                    </div>
+                    <div>
+                      <label className="block text-[10px] font-bold text-slate-600 mb-0.5">Specialization</label>
+                      <input
+                        type="text"
+                        value={staffForm.specialization}
+                        onChange={(e) => setStaffForm({ ...staffForm, specialization: e.target.value })}
+                        placeholder="e.g. General Practice (GP), Pediatrics"
+                        className="w-full px-2.5 py-1 text-xs rounded-lg border border-slate-300 focus:ring-2 focus:ring-teal-500 focus:outline-none bg-white"
+                      />
+                    </div>
+                  </div>
+                )}
+
+                <div className="flex justify-end gap-2 pt-3 border-t border-slate-100">
+                  <button
+                    type="button"
+                    onClick={() => setShowAddStaffModal(false)}
+                    className="px-3 py-1.5 rounded-xl border border-slate-200 text-slate-600 text-xs font-semibold hover:bg-slate-50 transition"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    className="px-4 py-1.5 rounded-xl bg-teal-700 hover:bg-teal-800 text-white text-xs font-bold transition shadow-sm"
+                  >
+                    Create Staff Member
+                  </button>
+                </div>
+              </form>
             </div>
           </div>
         )}

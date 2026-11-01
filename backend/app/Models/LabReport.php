@@ -35,6 +35,18 @@ class LabReport extends Model
         ];
     }
 
+    protected $appends = [
+        'file_url',
+    ];
+
+    public function getFileUrlAttribute(): ?string
+    {
+        if (!$this->file_path) {
+            return null;
+        }
+        return asset('storage/' . $this->file_path);
+    }
+
     public function patient(): BelongsTo
     {
         return $this->belongsTo(Patient::class);

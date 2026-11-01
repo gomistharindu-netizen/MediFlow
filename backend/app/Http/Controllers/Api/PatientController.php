@@ -133,4 +133,48 @@ class PatientController extends Controller
             'data' => $patient,
         ]);
     }
+
+    public function update(Request $request, int $id): JsonResponse
+    {
+        $patient = Patient::findOrFail($id);
+
+        $validated = $request->validate([
+            'first_name'           => 'sometimes|string|max:100',
+            'last_name'            => 'nullable|string|max:100',
+            'phone'                => 'sometimes|string|max:20',
+            'nic'                  => 'nullable|string|max:20',
+            'date_of_birth'        => 'nullable|date',
+            'gender'               => 'sometimes|in:male,female,other',
+            'address'              => 'nullable|string',
+            'allergies'            => 'nullable|array',
+            'chronic_conditions'   => 'nullable|array',
+            'guardian_name'        => 'nullable|string|max:100',
+            'guardian_relation'    => 'nullable|string|max:50',
+            'emergency_phone'      => 'nullable|string|max:20',
+            'notes'                => 'nullable|string',
+            'consent_given'        => 'sometimes|boolean',
+            'consent_language'     => 'sometimes|string',
+            'data_processing_notes'=> 'nullable|string',
+        ]);
+
+        $patient->update($validated);
+
+        // PDPA/HIPAA Audit Trail
+        AuditLogService::log(
+            action: 'UPDATED_PATIENT',
+            resourceType: 'Patient',
+            resourceId: $patient->id,
+            patientId: $patient->patient_id,
+            details: [
+                'patient_name'   => $patient->full_name,
+                'updated_fields' => array_keys($validated),
+            ]
+        );
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Patient record updated successfully',
+            'data'    => $patient->fresh(),
+        ]);
+    }
 }

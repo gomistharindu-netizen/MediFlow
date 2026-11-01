@@ -35,4 +35,12 @@ return [
         ],
     ],
 
+    'gemini' => [
+        'api_key' => env('GEMINI_API_KEY'),
+    ],
+
+    'google_vision' => [
+        'api_key' => env('GOOGLE_VISION_API_KEY'),
+    ],
+
 ];

@@ -66,4 +66,96 @@ class MedicineController extends Controller
             'data' => $medicines,
         ]);
     }
+
+    /**
+     * Create a new medicine in the pharmacy catalog.
+     */
+    public function store(Request $request): JsonResponse
+    {
+        $validated = $request->validate([
+            'name'          => 'required|string|max:255',
+            'generic_name'  => 'nullable|string|max:255',
+            'dosage_form'   => 'required|in:Tablet,Capsule,Syrup,Injection,Cream,Drops,Inhaler,Patch,Suppository,Other',
+            'strength'      => 'nullable|string|max:100',
+            'unit'          => 'required|string|max:50',
+            'reorder_level' => 'nullable|integer|min:0',
+            'is_active'     => 'sometimes|boolean',
+        ]);
+
+        $medicine = \App\Models\Medicine::create($validated);
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Medicine added to catalog successfully.',
+            'data'    => $medicine,
+        ], 201);
+    }
+
+    /**
+     * Update medicine master data.
+     */
+    public function update(Request $request, int $id): JsonResponse
+    {
+        $medicine = \App\Models\Medicine::findOrFail($id);
+
+        $validated = $request->validate([
+            'name'          => 'sometimes|string|max:255',
+            'generic_name'  => 'nullable|string|max:255',
+            'dosage_form'   => 'sometimes|in:Tablet,Capsule,Syrup,Injection,Cream,Drops,Inhaler,Patch,Suppository,Other',
+            'strength'      => 'nullable|string|max:100',
+            'unit'          => 'sometimes|string|max:50',
+            'reorder_level' => 'nullable|integer|min:0',
+            'is_active'     => 'sometimes|boolean',
+        ]);
+
+        $medicine->update($validated);
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Medicine updated successfully.',
+            'data'    => $medicine->fresh(),
+        ]);
+    }
+
+    /**
+     * Add a new stock batch (FIFO) to an existing medicine.
+     */
+    public function addBatch(Request $request, int $id): JsonResponse
+    {
+        $medicine = \App\Models\Medicine::findOrFail($id);
+
+        $validated = $request->validate([
+            'batch_number'       => 'required|string|max:100',
+            'expiry_date'        => 'required|date|after:today',
+            'quantity_received'  => 'required|integer|min:1',
+            'purchase_unit_price'=> 'nullable|numeric|min:0',
+            'selling_unit_price' => 'required|numeric|min:0',
+            'supplier_name'      => 'nullable|string|max:255',
+        ]);
+
+        $validated['quantity_available'] = $validated['quantity_received'];
+
+        $batch = $medicine->batches()->create($validated);
+
+        return response()->json([
+            'success' => true,
+            'message' => "Batch {$batch->batch_number} added. {$batch->quantity_received} units in stock.",
+            'data'    => $batch,
+        ], 201);
+    }
+
+    /**
+     * Get full medicine details with all batches.
+     */
+    public function show(int $id): JsonResponse
+    {
+        $medicine = \App\Models\Medicine::with(['batches' => function ($q) {
+            $q->orderBy('expiry_date', 'asc');
+        }])->findOrFail($id);
+
+        return response()->json([
+            'success' => true,
+            'data'    => $medicine,
+        ]);
+    }
 }

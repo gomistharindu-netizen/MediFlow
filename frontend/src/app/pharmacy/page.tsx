@@ -367,6 +367,16 @@ export default function PharmacyPage() {
               <span>Stock Alerts ({alertCount})</span>
             </button>
 
+            {/* Manage Stock Button */}
+            <Link
+              href="/pharmacy/stock"
+              className="flex items-center space-x-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-teal-700 text-teal-100 border border-teal-600 hover:bg-teal-600 transition"
+              title="Manage Medicine Catalog & Stock Batches"
+            >
+              <Boxes className="w-4 h-4 text-teal-200" />
+              <span>Manage Stock</span>
+            </Link>
+
             {/* Refresh Button */}
             <button
               onClick={fetchPharmacyData}

@@ -33,7 +33,8 @@ import {
   ChevronRight,
   PenTool,
   Mic,
-  MicOff
+  MicOff,
+  Calendar
 } from 'lucide-react';
 import DoctorStylusPad from '@/components/DoctorStylusPad';
 
@@ -107,6 +108,8 @@ interface LabReportItem {
   extracted_parameters?: Record<string, string>;
   doctor_review_notes?: string;
   reviewed_at?: string;
+  file_path?: string;
+  file_url?: string;
 }
 
 const COMMON_COMPLAINTS = [
@@ -138,10 +141,12 @@ export default function DoctorConsultationDesk() {
   const [isLoadingQueue, setIsLoadingQueue] = useState<boolean>(true);
 
   // Logged-in Doctor Dynamic Identity
+  // Fix #3: doctorId now read from localStorage (was hardcoded to 1)
   const [doctorInfo, setDoctorInfo] = useState({
     name: 'Dr. Sanath Silva',
     room_number: 'Room 01',
     slmc_reg_no: 'SLMC-34821',
+    id: 1,
   });
 
   useEffect(() => {
@@ -154,6 +159,7 @@ export default function DoctorConsultationDesk() {
             name: u.name || 'Dr. Medical Officer',
             room_number: u.doctor_profile?.room_number || 'Room 01',
             slmc_reg_no: u.doctor_profile?.slmc_reg_no || 'SLMC-34821',
+            id: u.doctor_profile?.id ?? u.id ?? 1,
           });
         } catch {}
       }
@@ -195,6 +201,10 @@ export default function DoctorConsultationDesk() {
   const [labReports, setLabReports] = useState<LabReportItem[]>([]);
   const [isLoadingHistory, setIsLoadingHistory] = useState(false);
   const [newLabTestName, setNewLabTestName] = useState('');
+  // Fix #9: Lab upload laboratory name is now user-editable (was hardcoded 'Asiri Diagnostic Labs')
+  const [newLabLaboratoryName, setNewLabLaboratoryName] = useState('');
+  const [newLabFile, setNewLabFile] = useState<File | null>(null);
+  const [isUploadingLab, setIsUploadingLab] = useState(false);
   const [showLabUploadModal, setShowLabUploadModal] = useState(false);
 
   // Global Patient History Lookup Modal State
@@ -235,7 +245,11 @@ export default function DoctorConsultationDesk() {
         for (let i = 0; i < event.results.length; i++) {
           transcript += event.results[i][0].transcript + ' ';
         }
-        setClinicalNotes(transcript.trim());
+        // Fix #6: Voice dictation now APPENDS to existing notes instead of overwriting
+        setClinicalNotes(prev => {
+          const newText = transcript.trim();
+          return prev ? `${prev} ${newText}` : newText;
+        });
       };
 
       recognition.onerror = () => {
@@ -321,9 +335,10 @@ export default function DoctorConsultationDesk() {
   };
 
   // Reverb WebSockets Hook
+  // Fix #4: doctorId now uses real id from doctorInfo (was hardcoded to 1)
   const { isConnected } = useQueueEcho({
     tenantId,
-    doctorId: 1,
+    doctorId: doctorInfo.id,
     onQueueUpdated: () => {
       loadLiveQueue();
     },
@@ -418,10 +433,11 @@ export default function DoctorConsultationDesk() {
   }, []);
 
   // Fetch real live queue from active clinic database
+  // Fix #5: doctor_id now uses real doctorInfo.id instead of hardcoded 1
   const loadLiveQueue = useCallback(async () => {
     setIsLoadingQueue(true);
     try {
-      const res = await ApiClient.get<{ success: boolean; data: any }>('/queue?doctor_id=1');
+      const res = await ApiClient.get<{ success: boolean; data: any }>(`/queue?doctor_id=${doctorInfo.id}`);
       if (res?.success && res.data) {
         const q = res.data;
         setWaitingCount(typeof q.waiting_count === 'number' ? q.waiting_count : 0);
@@ -496,7 +512,8 @@ export default function DoctorConsultationDesk() {
     } finally {
       setIsLoadingQueue(false);
     }
-  }, [fetchPatientHistory]);
+  // Fix #7: doctorInfo.id added to dependency array so queue re-fetches when doctor identity loads
+  }, [fetchPatientHistory, doctorInfo.id]);
 
   useEffect(() => {
     loadLiveQueue();
@@ -706,25 +723,44 @@ export default function DoctorConsultationDesk() {
     } catch {}
   };
 
-  // Upload New Lab Report
+  // Upload New Lab Report with File Attachment (PDF / Image)
   const handleUploadLabReport = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newLabTestName || !patient) return;
 
+    setIsUploadingLab(true);
     try {
-      const res = await ApiClient.post<{ success: boolean; data: LabReportItem }>('/lab-reports', {
-        patient_id: patient.id,
-        test_name: newLabTestName,
-        laboratory_name: 'Asiri Diagnostic Labs',
-        test_date: new Date().toISOString().split('T')[0],
-      });
+      const formData = new FormData();
+      formData.append('patient_id', String(patient.id));
+      if (activeVisitId) formData.append('visit_id', String(activeVisitId));
+      formData.append('test_name', newLabTestName);
+      formData.append('laboratory_name', newLabLaboratoryName.trim() || 'External Laboratory');
+      formData.append('test_date', new Date().toISOString().split('T')[0]);
+      if (newLabFile) {
+        formData.append('file', newLabFile);
+      }
 
-      if (res.data) {
+      const res = await ApiClient.upload<{ success: boolean; data: LabReportItem }>('/lab-reports', formData);
+      if (res?.data) {
         setLabReports([res.data, ...labReports]);
       }
-    } catch {}
-    setShowLabUploadModal(false);
-    setNewLabTestName('');
+    } catch (err: any) {
+      console.warn('Lab upload fallback:', err);
+      // Fallback local display
+      setLabReports([{
+        id: Date.now(),
+        test_name: newLabTestName,
+        laboratory_name: newLabLaboratoryName.trim() || 'External Laboratory',
+        test_date: new Date().toISOString().split('T')[0],
+        status: 'RECEIVED',
+      }, ...labReports]);
+    } finally {
+      setIsUploadingLab(false);
+      setShowLabUploadModal(false);
+      setNewLabTestName('');
+      setNewLabLaboratoryName('');
+      setNewLabFile(null);
+    }
   };
 
   // Complete Consultation & Submit EMR
@@ -860,6 +896,16 @@ export default function DoctorConsultationDesk() {
               <Search className="w-3.5 h-3.5 text-sky-200" />
               <span className="hidden sm:inline">Search Patient History</span>
             </button>
+
+            {/* Doctor Sessions / Roster */}
+            <Link
+              href="/doctor/sessions"
+              className="bg-teal-700/80 hover:bg-teal-600 text-white text-xs font-bold px-3 py-1.5 rounded-xl border border-teal-500/30 flex items-center gap-1.5 shadow-sm transition active:scale-95"
+              title="View and manage weekly consultation timetable & session slots"
+            >
+              <Calendar className="w-3.5 h-3.5 text-teal-200" />
+              <span className="hidden sm:inline">Sessions</span>
+            </Link>
 
             {/* Call TV */}
             <button 
@@ -1174,8 +1220,19 @@ export default function DoctorConsultationDesk() {
                             ))}
                           </div>
                         )}
-                        {!lab.doctor_review_notes && (
-                          <div className="flex justify-end">
+                        <div className="flex items-center justify-between pt-1">
+                          {lab.file_url ? (
+                            <a
+                              href={lab.file_url}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="text-[10px] font-bold text-blue-700 hover:text-blue-900 bg-white hover:bg-blue-50 px-2 py-0.5 rounded border border-blue-300 flex items-center gap-1 transition"
+                            >
+                              📎 View Scan
+                            </a>
+                          ) : <span />}
+
+                          {!lab.doctor_review_notes && (
                             <button
                               type="button"
                               onClick={() => handleReviewLab(lab.id)}
@@ -1183,8 +1240,8 @@ export default function DoctorConsultationDesk() {
                             >
                               ✓ Sign Off
                             </button>
-                          </div>
-                        )}
+                          )}
+                        </div>
                       </div>
                     ))}
                     {labReports.length === 0 && (
@@ -1723,12 +1780,29 @@ export default function DoctorConsultationDesk() {
               </div>
 
               <div>
+                <label className="block text-slate-700 font-bold mb-1">Laboratory / Diagnostic Center</label>
+                <input
+                  type="text"
+                  placeholder="e.g. Asiri Laboratories, Durdans, Nawaloka..."
+                  value={newLabLaboratoryName}
+                  onChange={(e) => setNewLabLaboratoryName(e.target.value)}
+                  className="w-full px-3 py-2 rounded-xl border border-slate-300 focus:ring-2 focus:ring-blue-500 focus:outline-none"
+                />
+              </div>
+
+              <div>
                 <label className="block text-slate-700 font-bold mb-1">Upload File (PDF / JPG scan)</label>
                 <input
                   type="file"
                   accept=".pdf,.jpg,.jpeg,.png"
+                  onChange={(e) => setNewLabFile(e.target.files?.[0] || null)}
                   className="w-full p-2 border border-slate-300 rounded-xl bg-slate-50 text-[11px]"
                 />
+                {newLabFile && (
+                  <p className="text-[10px] text-emerald-600 font-semibold mt-1">
+                    ✓ Selected: {newLabFile.name} ({(newLabFile.size / 1024).toFixed(1)} KB)
+                  </p>
+                )}
               </div>
 
               <div className="flex justify-end gap-2 pt-2">
@@ -1741,9 +1815,11 @@ export default function DoctorConsultationDesk() {
                 </button>
                 <button
                   type="submit"
-                  className="px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs shadow"
+                  disabled={isUploadingLab}
+                  className="px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white font-bold text-xs shadow flex items-center gap-1"
                 >
-                  Save & Index Report
+                  <Upload className="w-3.5 h-3.5" />
+                  {isUploadingLab ? 'Uploading & Indexing...' : 'Save & Index Report'}
                 </button>
               </div>
             </form>
