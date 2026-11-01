@@ -16,10 +16,14 @@ return [
      *
      * Only relevant if you're using the domain or subdomain identification middleware.
      */
-    'central_domains' => [
+    'central_domains' => array_values(array_filter([
         '127.0.0.1',
         'localhost',
-    ],
+        parse_url(env('APP_URL', 'http://localhost'), PHP_URL_HOST),
+        env('CENTRAL_DOMAIN'),
+        'mediflow-1zo1.onrender.com',
+        isset($_SERVER['HTTP_HOST']) && str_contains($_SERVER['HTTP_HOST'], 'onrender.com') ? $_SERVER['HTTP_HOST'] : null,
+    ])),
 
     /**
      * Tenancy bootstrappers are executed when tenancy is initialized.

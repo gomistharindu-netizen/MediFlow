@@ -98,7 +98,7 @@ Route::middleware([
     'web',
     InitializeTenancyByDomain::class,
 ])->group(function () {
-    Route::get('/', function () {
+    Route::get('/tenant-status', function () {
         return response()->json([
             'message' => 'MediFlow Tenant Web Gateway',
             'tenant' => tenant('id'),
