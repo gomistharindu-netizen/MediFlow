@@ -171,7 +171,7 @@ export default function CashierPage() {
   const [queueVisits, setQueueVisits] = useState<QueueVisit[]>([]);
   const [selectedInvoice, setSelectedInvoice] = useState<InvoiceRecord | null>(null);
   const [reconciliation, setReconciliation] = useState<ReconciliationReport | null>(null);
-  const [reconDate, setReconDate] = useState<string>(() => new Date().toISOString().split('T')[0]);
+  const [reconDate, setReconDate] = useState<string>('');
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [isSettling, setIsSettling] = useState<boolean>(false);
   const [searchQuery, setSearchQuery] = useState<string>('');
@@ -281,6 +281,10 @@ export default function CashierPage() {
     link.click();
     document.body.removeChild(link);
   };
+
+  useEffect(() => {
+    setReconDate(new Date().toISOString().split('T')[0]);
+  }, []);
 
   useEffect(() => {
     loadCashierData();
