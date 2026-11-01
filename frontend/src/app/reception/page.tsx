@@ -30,6 +30,19 @@ import {
   Flame
 } from 'lucide-react';
 
+interface DoctorSessionOption {
+  id: number;
+  doctor_id: number;
+  session_title: string;
+  day_of_week: string;
+  start_time: string;
+  end_time: string;
+  max_patients: number;
+  booked_count?: number;
+  available_slots?: number;
+  is_full?: boolean;
+}
+
 interface TodayVisit {
   id: number;
   token_number: number;
@@ -42,6 +55,12 @@ interface TodayVisit {
       name: string;
     };
     room_number?: string;
+  };
+  session?: {
+    id: number;
+    session_title: string;
+    start_time?: string;
+    end_time?: string;
   };
 }
 
@@ -70,12 +89,36 @@ export default function ReceptionDesk() {
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<'all' | 'today'>('all');
   const [reissueConfirmPatient, setReissueConfirmPatient] = useState<Patient | null>(null);
+  
+  // Doctor & Session Selection State
+  const [doctorsList, setDoctorsList] = useState<Array<{ id: number; name: string; room_number?: string; specialization?: string }>>([]);
+  const [allSessions, setAllSessions] = useState<DoctorSessionOption[]>([]);
+
+  // Walk-in Token Modal State
+  const [showWalkInModal, setShowWalkInModal] = useState(false);
+  const [walkInPatient, setWalkInPatient] = useState<Patient | null>(null);
+  const [walkInDoctorId, setWalkInDoctorId] = useState<number>(1);
+  const [walkInSessionId, setWalkInSessionId] = useState<number | ''>('');
+
+  // Phone / Advance Booking Modal State
   const [showAdvanceModal, setShowAdvanceModal] = useState(false);
   const [advancePatient, setAdvancePatient] = useState<Patient | null>(null);
   const [advanceDate, setAdvanceDate] = useState('');
   const [advanceDoctorId, setAdvanceDoctorId] = useState(1);
-  // Fix #8: Doctors list now loaded from API instead of hardcoded
-  const [doctorsList, setDoctorsList] = useState<Array<{ id: number; name: string; room_number?: string; specialization?: string }>>([]);
+  const [advanceSessionId, setAdvanceSessionId] = useState<number | ''>('');
+
+  // Helper to retrieve scheduled sessions matching a doctor and date
+  const getSessionsForDoctorAndDate = (doctorId: number, dateStr?: string) => {
+    const targetDate = dateStr ? new Date(dateStr) : new Date();
+    const days = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
+    const targetDay = days[targetDate.getDay()];
+
+    return allSessions.filter(s => 
+      s.doctor_id === doctorId && 
+      (!s.day_of_week || s.day_of_week.toLowerCase() === targetDay)
+    );
+  };
+
   // Patient Edit Modal State
   const [showEditModal, setShowEditModal] = useState(false);
   const [editingPatient, setEditingPatient] = useState<Patient | null>(null);
@@ -104,26 +147,42 @@ export default function ReceptionDesk() {
     }
   }, []);
 
-  // Fix #8: Fetch doctors from API on mount
-  useEffect(() => {
-    const fetchDoctors = async () => {
-      try {
-        const res = await ApiClient.get<{ success: boolean; data: any[] }>('/doctors');
-        if (res?.success && Array.isArray(res.data)) {
-          setDoctorsList(res.data.map((d: any) => ({
-            id: d.id,
-            name: d.user?.name || 'Doctor',
-            room_number: d.room_number,
-            specialization: d.specialization,
-          })));
-          if (res.data.length > 0) setAdvanceDoctorId(res.data[0].id);
+  const fetchDoctorData = async () => {
+    try {
+      const [docsRes, sessRes] = await Promise.all([
+        ApiClient.get<{ success: boolean; data: any[] }>('/doctors'),
+        ApiClient.get<{ success: boolean; data: DoctorSessionOption[] }>('/doctor-sessions'),
+      ]);
+
+      if (docsRes?.success && Array.isArray(docsRes.data)) {
+        const formattedDocs = docsRes.data.map((d: any) => ({
+          id: d.id,
+          name: d.user?.name || 'Doctor',
+          room_number: d.room_number,
+          specialization: d.specialization,
+        }));
+        setDoctorsList(formattedDocs);
+        if (formattedDocs.length > 0) {
+          setAdvanceDoctorId(formattedDocs[0].id);
+          setWalkInDoctorId(formattedDocs[0].id);
         }
-      } catch {
-        // Fallback: keep default doctor_id=1 if API offline
-        setDoctorsList([{ id: 1, name: 'Dr. Medical Officer', room_number: 'Room 01' }]);
       }
-    };
-    fetchDoctors();
+
+      if (sessRes?.success && Array.isArray(sessRes.data)) {
+        setAllSessions(sessRes.data);
+      }
+    } catch {
+      // Fallback
+      setDoctorsList([{ id: 1, name: 'Dr. Medical Officer', room_number: 'Room 01' }]);
+      setAllSessions([
+        { id: 1, doctor_id: 1, session_title: 'Morning Consultation', day_of_week: 'Monday', start_time: '08:30', end_time: '12:30', max_patients: 30, booked_count: 5, available_slots: 25 },
+        { id: 2, doctor_id: 1, session_title: 'Evening OPD', day_of_week: 'Monday', start_time: '16:30', end_time: '20:00', max_patients: 25, booked_count: 0, available_slots: 25 },
+      ]);
+    }
+  };
+
+  useEffect(() => {
+    fetchDoctorData();
   }, [tenantId]);
 
   // Form State
@@ -245,12 +304,33 @@ export default function ReceptionDesk() {
     }
   };
 
-  const handleBookToken = async (patientId: number, patientName: string) => {
+  const handleOpenWalkInModal = (patient: Patient) => {
+    setWalkInPatient(patient);
+    const initialDocId = doctorsList.length > 0 ? doctorsList[0].id : 1;
+    setWalkInDoctorId(initialDocId);
+    const matchingSessions = getSessionsForDoctorAndDate(initialDocId);
+    setWalkInSessionId(matchingSessions.length > 0 ? matchingSessions[0].id : '');
+    setShowWalkInModal(true);
+  };
+
+  const handleOpenPhoneBooking = (patient: Patient) => {
+    setAdvancePatient(patient);
+    const initialDocId = doctorsList.length > 0 ? doctorsList[0].id : 1;
+    setAdvanceDoctorId(initialDocId);
+    const matchingSessions = getSessionsForDoctorAndDate(initialDocId, advanceDate);
+    setAdvanceSessionId(matchingSessions.length > 0 ? matchingSessions[0].id : '');
+    setShowAdvanceModal(true);
+  };
+
+  const handleConfirmWalkInToken = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!walkInPatient) return;
     try {
       setIsLoading(true);
       const bookingRes = await ApiClient.post<{ success: boolean; data: any }>('/bookings', {
-        patient_id: patientId,
-        doctor_id: 1,
+        patient_id: walkInPatient.id,
+        doctor_id: walkInDoctorId,
+        doctor_session_id: walkInSessionId ? Number(walkInSessionId) : null,
       });
 
       if (bookingRes?.success && bookingRes.data) {
@@ -258,14 +338,16 @@ export default function ReceptionDesk() {
           reference: bookingRes.data.booking_reference,
         });
 
-        setSuccessMessage(`Token #${bookingRes.data.token_number} issued and checked in for ${patientName}! Patient sent to Doctor Queue.`);
+        setSuccessMessage(`Token #${bookingRes.data.token_number} issued for ${walkInPatient.first_name}! Linked to session & sent to Doctor Queue.`);
+        setShowWalkInModal(false);
+        setWalkInPatient(null);
         fetchPatients(searchQuery);
+        fetchDoctorData();
         setTimeout(() => setSuccessMessage(null), 5000);
       }
-    } catch {
-      setSuccessMessage(`Token allocated for ${patientName}! Doctor queue updated.`);
-      fetchPatients(searchQuery);
-      setTimeout(() => setSuccessMessage(null), 4000);
+    } catch (err: any) {
+      setSuccessMessage(err.message || `Token allocation failed.`);
+      setTimeout(() => setSuccessMessage(null), 5000);
     } finally {
       setIsLoading(false);
     }
@@ -279,6 +361,7 @@ export default function ReceptionDesk() {
       const res = await ApiClient.post<{ success: boolean; data: any }>('/bookings', {
         patient_id: advancePatient.id,
         doctor_id: advanceDoctorId,
+        doctor_session_id: advanceSessionId ? Number(advanceSessionId) : null,
         date: advanceDate,
       });
       if (res?.success) {
@@ -286,10 +369,11 @@ export default function ReceptionDesk() {
         setShowAdvanceModal(false);
         setAdvancePatient(null);
         fetchPatients(searchQuery);
+        fetchDoctorData();
         setTimeout(() => setSuccessMessage(null), 6000);
       }
-    } catch {
-      setSuccessMessage(`Appointment scheduled for ${advancePatient.first_name}!`);
+    } catch (err: any) {
+      setSuccessMessage(err.message || `Appointment scheduled for ${advancePatient.first_name}!`);
       setShowAdvanceModal(false);
       fetchPatients(searchQuery);
     } finally {
@@ -554,130 +638,136 @@ export default function ReceptionDesk() {
                       {/* Today's Live Clinic Queue Status */}
                       <td className="py-3 px-4">
                         {visit ? (
-                          visit.status === 'NOT_CHECKED_IN' ? (
-                            <span className="inline-flex items-center gap-1 text-xs font-bold px-2.5 py-1 rounded-full bg-blue-100 text-blue-900 border border-blue-300">
-                              <Calendar className="w-3.5 h-3.5 text-blue-600" />
-                              Token #{visit.token_number} • Booked (Awaiting Arrival)
-                            </span>
-                          ) : visit.status === 'WAITING' ? (
-                            visit.priority_level === 'EMERGENCY' ? (
-                              <span className="inline-flex items-center gap-1 text-xs font-black px-2.5 py-1 rounded-full bg-rose-600 text-white shadow-sm animate-pulse">
-                                <Flame className="w-3.5 h-3.5 text-yellow-300" />
-                                Token #{visit.token_number} • EMERGENCY
+                          <div>
+                            {visit.status === 'NOT_CHECKED_IN' ? (
+                              <span className="inline-flex items-center gap-1 text-xs font-bold px-2.5 py-1 rounded-full bg-blue-100 text-blue-900 border border-blue-300">
+                                <Calendar className="w-3.5 h-3.5 text-blue-600" />
+                                Token #{visit.token_number} • Booked (Awaiting Arrival)
+                              </span>
+                            ) : visit.status === 'WAITING' ? (
+                              visit.priority_level === 'EMERGENCY' ? (
+                                <span className="inline-flex items-center gap-1 text-xs font-black px-2.5 py-1 rounded-full bg-rose-600 text-white shadow-sm animate-pulse">
+                                  <Flame className="w-3.5 h-3.5 text-yellow-300" />
+                                  Token #{visit.token_number} • EMERGENCY
+                                </span>
+                              ) : (
+                                <span className="inline-flex items-center gap-1 text-xs font-black px-2.5 py-1 rounded-full bg-amber-100 text-amber-900 border border-amber-300">
+                                  <Clock className="w-3.5 h-3.5 text-amber-600" />
+                                  Token #{visit.token_number} • Waiting
+                                </span>
+                              )
+                            ) : (visit.status === 'CALLED' || visit.status === 'IN_CONSULTATION') ? (
+                              <span className="inline-flex items-center gap-1 text-xs font-black px-2.5 py-1 rounded-full bg-teal-100 text-teal-900 border border-teal-400 animate-pulse">
+                                <Stethoscope className="w-3.5 h-3.5 text-teal-700" />
+                                Token #{visit.token_number} • In Room
+                              </span>
+                            ) : visit.status === 'COMPLETED' ? (
+                              <span className="inline-flex items-center gap-1 text-xs font-bold px-2.5 py-1 rounded-full bg-emerald-100 text-emerald-900 border border-emerald-300">
+                                <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
+                                Token #{visit.token_number} • Consulted Today
+                              </span>
+                            ) : visit.status === 'MISSED' ? (
+                              <span className="inline-flex items-center gap-1 text-xs font-bold px-2.5 py-1 rounded-full bg-rose-100 text-rose-900 border border-rose-300">
+                                <AlertCircle className="w-3.5 h-3.5 text-rose-600" />
+                                Token #{visit.token_number} • Missed
                               </span>
                             ) : (
-                              <span className="inline-flex items-center gap-1 text-xs font-black px-2.5 py-1 rounded-full bg-amber-100 text-amber-900 border border-amber-300">
-                                <Clock className="w-3.5 h-3.5 text-amber-600" />
-                                Token #{visit.token_number} • Waiting
-                              </span>
-                            )
-                          ) : (visit.status === 'CALLED' || visit.status === 'IN_CONSULTATION') ? (
-                            <span className="inline-flex items-center gap-1 text-xs font-black px-2.5 py-1 rounded-full bg-teal-100 text-teal-900 border border-teal-400 animate-pulse">
-                              <Stethoscope className="w-3.5 h-3.5 text-teal-700" />
-                              Token #{visit.token_number} • In Room
-                            </span>
-                          ) : visit.status === 'COMPLETED' ? (
-                            <span className="inline-flex items-center gap-1 text-xs font-bold px-2.5 py-1 rounded-full bg-emerald-100 text-emerald-900 border border-emerald-300">
-                              <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
-                              Token #{visit.token_number} • Consulted Today
-                            </span>
-                          ) : visit.status === 'MISSED' ? (
-                            <span className="inline-flex items-center gap-1 text-xs font-bold px-2.5 py-1 rounded-full bg-rose-100 text-rose-900 border border-rose-300">
-                              <AlertCircle className="w-3.5 h-3.5 text-rose-600" />
-                              Token #{visit.token_number} • Missed
-                            </span>
-                          ) : (
-                            <span className="text-xs text-slate-600 font-medium">Token #{visit.token_number}</span>
-                          )
+                              <span className="text-xs text-slate-600 font-medium">Token #{visit.token_number}</span>
+                            )}
+                            {visit.session && (
+                              <div className="text-[10px] text-teal-800 font-semibold mt-1 flex items-center gap-1">
+                                <Tag className="w-3 h-3 text-teal-600 flex-shrink-0" />
+                                <span className="truncate">{visit.session.session_title}</span>
+                                {visit.doctor?.user?.name && <span className="text-slate-400 font-normal">({visit.doctor.user.name})</span>}
+                              </div>
+                            )}
+                          </div>
                         ) : (
                           <span className="text-[11px] text-slate-400 italic">Not checked in today</span>
                         )}
                       </td>
 
-                      {/* Action Button: Prevents accidental duplicate token issuing! */}
-                      <td className="py-3 px-4 text-right">
-                        <div className="flex items-center justify-end gap-1.5">
-                          <button
-                            onClick={() => openEditModal(patient)}
-                            className="bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs px-2.5 py-1.5 rounded-lg border border-slate-300 transition inline-flex items-center gap-1"
-                            title="Edit patient details"
-                          >
-                            <Edit className="w-3 h-3 text-slate-600" />
-                            <span className="hidden sm:inline">Edit</span>
-                          </button>
+                    {/* Action Button: Prevents accidental duplicate token issuing! */}
+                    <td className="py-3 px-4 text-right">
+                      <div className="flex items-center justify-end gap-1.5">
+                        <button
+                          onClick={() => openEditModal(patient)}
+                          className="bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs px-2.5 py-1.5 rounded-lg border border-slate-300 transition inline-flex items-center gap-1"
+                          title="Edit patient details"
+                        >
+                          <Edit className="w-3 h-3 text-slate-600" />
+                          <span className="hidden sm:inline">Edit</span>
+                        </button>
 
-                          {visit ? (
-                            visit.status === 'NOT_CHECKED_IN' ? (
-                              <button
-                                onClick={() => handleDirectCheckIn(visit.booking_reference || '', `${patient.first_name} ${patient.last_name || ''}`)}
-                                disabled={isLoading}
-                                className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs px-3.5 py-1.5 rounded-lg shadow-sm transition inline-flex items-center gap-1.5 active:scale-95"
-                                title="Patient has arrived at clinic. Check-in to enter live Doctor Queue"
-                              >
-                                <CheckCircle2 className="w-3.5 h-3.5" />
-                                Check-in Patient
-                              </button>
-                            ) : visit.status === 'COMPLETED' ? (
-                              <button
-                                onClick={() => setReissueConfirmPatient(patient)}
-                                className="text-xs font-bold text-slate-700 hover:text-teal-900 bg-slate-100 hover:bg-slate-200 px-3 py-1.5 rounded-lg border border-slate-300 transition inline-flex items-center gap-1"
-                                title="Patient was already consulted today. Issue a new token only if required."
-                              >
-                                <RotateCcw className="w-3 h-3 text-slate-500" />
-                                + Re-issue
-                              </button>
-                            ) : (
-                              <div className="flex items-center gap-1">
-                                {visit.status === 'WAITING' && visit.priority_level !== 'EMERGENCY' && (
-                                  <button
-                                    onClick={() => {
-                                      setEmergencyTarget({
-                                        visitId: visit.id,
-                                        patientName: `${patient.first_name} ${patient.last_name || ''}`,
-                                        tokenNumber: visit.token_number,
-                                      });
-                                      setShowEmergencyModal(true);
-                                    }}
-                                    className="bg-rose-50 hover:bg-rose-100 text-rose-700 hover:text-rose-900 border border-rose-200 text-xs font-bold px-2 py-1.5 rounded-lg transition inline-flex items-center gap-1 shadow-xs"
-                                    title="Fast-track to top of Doctor Queue for urgent/emergency patient"
-                                  >
-                                    <Flame className="w-3.5 h-3.5 text-rose-600" />
-                                    <span>Emergency</span>
-                                  </button>
-                                )}
-                                <span 
-                                  className="text-xs font-bold text-teal-900 bg-teal-50 border border-teal-300 px-2.5 py-1.5 rounded-lg inline-flex items-center gap-1 cursor-default shadow-xs"
-                                  title={`Token #${visit.token_number} is currently active in the queue`}
-                                >
-                                  <CheckCircle2 className="w-3.5 h-3.5 text-teal-600" />
-                                  Active
-                                </span>
-                              </div>
-                            )
+                        {visit ? (
+                          visit.status === 'NOT_CHECKED_IN' ? (
+                            <button
+                              onClick={() => handleDirectCheckIn(visit.booking_reference || '', `${patient.first_name} ${patient.last_name || ''}`)}
+                              disabled={isLoading}
+                              className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs px-3.5 py-1.5 rounded-lg shadow-sm transition inline-flex items-center gap-1.5 active:scale-95"
+                              title="Patient has arrived at clinic. Check-in to enter live Doctor Queue"
+                            >
+                              <CheckCircle2 className="w-3.5 h-3.5" />
+                              Check-in Patient
+                            </button>
+                          ) : visit.status === 'COMPLETED' ? (
+                            <button
+                              onClick={() => setReissueConfirmPatient(patient)}
+                              className="text-xs font-bold text-slate-700 hover:text-teal-900 bg-slate-100 hover:bg-slate-200 px-3 py-1.5 rounded-lg border border-slate-300 transition inline-flex items-center gap-1"
+                              title="Patient was already consulted today. Issue a new token only if required."
+                            >
+                              <RotateCcw className="w-3 h-3 text-slate-500" />
+                              + Re-issue
+                            </button>
                           ) : (
-                            <>
-                              <button
-                                onClick={() => handleBookToken(patient.id, `${patient.first_name} ${patient.last_name || ''}`)}
-                                disabled={isLoading}
-                                className="bg-teal-700 hover:bg-teal-800 text-white font-bold text-xs px-3 py-1.5 rounded-lg shadow-sm transition inline-flex items-center gap-1 active:scale-95 disabled:opacity-50"
-                                title="Direct walk-in check-in for patient standing at desk"
+                            <div className="flex items-center gap-1">
+                              {visit.status === 'WAITING' && visit.priority_level !== 'EMERGENCY' && (
+                                <button
+                                  onClick={() => {
+                                    setEmergencyTarget({
+                                      visitId: visit.id,
+                                      patientName: `${patient.first_name} ${patient.last_name || ''}`,
+                                      tokenNumber: visit.token_number,
+                                    });
+                                    setShowEmergencyModal(true);
+                                  }}
+                                  className="bg-rose-50 hover:bg-rose-100 text-rose-700 hover:text-rose-900 border border-rose-200 text-xs font-bold px-2 py-1.5 rounded-lg transition inline-flex items-center gap-1 shadow-xs"
+                                  title="Fast-track to top of Doctor Queue for urgent/emergency patient"
+                                >
+                                  <Flame className="w-3.5 h-3.5 text-rose-600" />
+                                  <span>Emergency</span>
+                                </button>
+                              )}
+                              <span 
+                                className="text-xs font-bold text-teal-900 bg-teal-50 border border-teal-300 px-2.5 py-1.5 rounded-lg inline-flex items-center gap-1 cursor-default shadow-xs"
+                                title={`Token #${visit.token_number} is currently active in the queue`}
                               >
-                                Walk-in Token <ChevronRight className="w-3 h-3" />
-                              </button>
-                              <button
-                                onClick={() => {
-                                  setAdvancePatient(patient);
-                                  setShowAdvanceModal(true);
-                                }}
-                                disabled={isLoading}
-                                className="bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs px-2.5 py-1.5 rounded-lg border border-slate-300 transition inline-flex items-center gap-1"
-                                title="Schedule phone appointment for today or advance date without check-in"
-                              >
-                                <PhoneCall className="w-3 h-3 text-sky-600" />
-                                <span className="hidden sm:inline">Phone Booking</span>
-                              </button>
-                            </>
-                          )}
+                                <CheckCircle2 className="w-3.5 h-3.5 text-teal-600" />
+                                Active
+                              </span>
+                            </div>
+                          )
+                        ) : (
+                          <>
+                            <button
+                              onClick={() => handleOpenWalkInModal(patient)}
+                              disabled={isLoading}
+                              className="bg-teal-700 hover:bg-teal-800 text-white font-bold text-xs px-3 py-1.5 rounded-lg shadow-sm transition inline-flex items-center gap-1 active:scale-95 disabled:opacity-50"
+                              title="Direct walk-in check-in for patient standing at desk"
+                            >
+                              Walk-in Token <ChevronRight className="w-3 h-3" />
+                            </button>
+                            <button
+                              onClick={() => handleOpenPhoneBooking(patient)}
+                              disabled={isLoading}
+                              className="bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs px-2.5 py-1.5 rounded-lg border border-slate-300 transition inline-flex items-center gap-1"
+                              title="Schedule phone appointment for today or advance date without check-in"
+                            >
+                              <PhoneCall className="w-3 h-3 text-sky-600" />
+                              <span className="hidden sm:inline">Phone Booking</span>
+                            </button>
+                          </>
+                        )}
                         </div>
                       </td>
                     </tr>
@@ -916,13 +1006,114 @@ export default function ReceptionDesk() {
                 onClick={() => {
                   const p = reissueConfirmPatient;
                   setReissueConfirmPatient(null);
-                  handleBookToken(p.id, `${p.first_name} ${p.last_name || ''}`);
+                  handleOpenWalkInModal(p);
                 }}
                 className="px-4 py-2 rounded-xl bg-teal-700 hover:bg-teal-800 text-white shadow transition"
               >
                 Yes, Issue New Token
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Walk-in Token & Session Allocation Modal */}
+      {showWalkInModal && walkInPatient && (
+        <div className="fixed inset-0 z-50 bg-slate-900/40 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl max-w-md w-full p-6 shadow-2xl border border-slate-200 animate-in fade-in zoom-in-95">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-100 mb-4">
+              <div className="flex items-center gap-2.5">
+                <div className="w-9 h-9 rounded-xl bg-teal-100 text-teal-700 flex items-center justify-center">
+                  <Stethoscope className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="font-extrabold text-base text-slate-900">Issue Walk-in Token</h3>
+                  <p className="text-xs text-slate-500">Assign patient to doctor and live consultation session</p>
+                </div>
+              </div>
+              <button 
+                onClick={() => {
+                  setShowWalkInModal(false);
+                  setWalkInPatient(null);
+                }} 
+                className="text-slate-400 hover:text-slate-600 font-bold text-lg"
+              >
+                ✕
+              </button>
+            </div>
+
+            <form onSubmit={handleConfirmWalkInToken} className="space-y-4 text-xs sm:text-sm">
+              <div className="p-3 bg-slate-50 border border-slate-200 rounded-xl space-y-1">
+                <div className="text-[10px] text-slate-500 font-mono font-bold">{walkInPatient.patient_id}</div>
+                <div className="font-extrabold text-slate-900 text-sm">{walkInPatient.first_name} {walkInPatient.last_name || ''}</div>
+                <div className="text-xs text-slate-600">📞 Contact Phone: <strong>{walkInPatient.phone}</strong></div>
+              </div>
+
+              <div>
+                <label className="block text-slate-700 font-semibold mb-1">Select Duty Doctor *</label>
+                <select
+                  value={walkInDoctorId}
+                  onChange={(e) => {
+                    const docId = Number(e.target.value);
+                    setWalkInDoctorId(docId);
+                    const matchingSessions = getSessionsForDoctorAndDate(docId);
+                    setWalkInSessionId(matchingSessions.length > 0 ? matchingSessions[0].id : '');
+                  }}
+                  className="w-full px-3 py-2 rounded-xl border border-slate-300 focus:ring-2 focus:ring-teal-500 font-semibold text-slate-800"
+                >
+                  {doctorsList.map((doc) => (
+                    <option key={doc.id} value={doc.id}>
+                      {doc.name}{doc.specialization ? ` (${doc.specialization})` : ''}{doc.room_number ? ` - ${doc.room_number}` : ''}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="block text-slate-700 font-semibold">Doctor Clinical Session *</label>
+                  <span className="text-[11px] text-teal-700 font-medium">Today's Roster</span>
+                </div>
+                {getSessionsForDoctorAndDate(walkInDoctorId).length > 0 ? (
+                  <select
+                    value={walkInSessionId}
+                    onChange={(e) => setWalkInSessionId(e.target.value ? Number(e.target.value) : '')}
+                    className="w-full px-3 py-2 rounded-xl border border-slate-300 focus:ring-2 focus:ring-teal-500 font-semibold text-slate-800"
+                  >
+                    {getSessionsForDoctorAndDate(walkInDoctorId).map((s) => (
+                      <option key={s.id} value={s.id} disabled={s.is_full}>
+                        {s.session_title} ({s.start_time} - {s.end_time}) — {s.available_slots ?? (s.max_patients - (s.booked_count || 0))}/{s.max_patients} slots left {s.is_full ? '⚠️ [FULL]' : ''}
+                      </option>
+                    ))}
+                  </select>
+                ) : (
+                  <div className="p-3 rounded-xl bg-amber-50 border border-amber-200 text-amber-900 text-xs">
+                    No scheduled timetable session found for this doctor today. Token will be allocated to doctor's general queue.
+                  </div>
+                )}
+              </div>
+
+              <div className="pt-2 border-t border-slate-100 flex items-center justify-end gap-2 text-xs font-bold">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowWalkInModal(false);
+                    setWalkInPatient(null);
+                  }}
+                  className="px-4 py-2 rounded-xl border border-slate-300 text-slate-600 hover:bg-slate-100 transition"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={isLoading}
+                  className="px-5 py-2 rounded-xl bg-teal-700 hover:bg-teal-800 disabled:opacity-50 text-white shadow transition flex items-center gap-1.5"
+                >
+                  <CheckCircle2 className="w-3.5 h-3.5" />
+                  Issue Token & Check In
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}
@@ -963,7 +1154,12 @@ export default function ReceptionDesk() {
                 <label className="block text-slate-700 font-semibold mb-1">Select Doctor *</label>
                 <select
                   value={advanceDoctorId}
-                  onChange={(e) => setAdvanceDoctorId(Number(e.target.value))}
+                  onChange={(e) => {
+                    const docId = Number(e.target.value);
+                    setAdvanceDoctorId(docId);
+                    const matchingSessions = getSessionsForDoctorAndDate(docId, advanceDate);
+                    setAdvanceSessionId(matchingSessions.length > 0 ? matchingSessions[0].id : '');
+                  }}
                   className="w-full px-3 py-2 rounded-xl border border-slate-300 focus:ring-2 focus:ring-teal-500 font-semibold text-slate-800"
                 >
                   {/* Fix #8: Dynamic doctors from API */}
@@ -981,10 +1177,39 @@ export default function ReceptionDesk() {
                   type="date"
                   value={advanceDate}
                   min={advanceDate || undefined}
-                  onChange={(e) => setAdvanceDate(e.target.value)}
+                  onChange={(e) => {
+                    const newDate = e.target.value;
+                    setAdvanceDate(newDate);
+                    const matchingSessions = getSessionsForDoctorAndDate(advanceDoctorId, newDate);
+                    setAdvanceSessionId(matchingSessions.length > 0 ? matchingSessions[0].id : '');
+                  }}
                   className="w-full px-3 py-2 rounded-xl border border-slate-300 focus:ring-2 focus:ring-teal-500 font-semibold text-slate-800"
                   required
                 />
+              </div>
+
+              <div>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="block text-slate-700 font-semibold">Doctor Clinical Session *</label>
+                  <span className="text-[11px] text-sky-700 font-medium">Session Capacity</span>
+                </div>
+                {getSessionsForDoctorAndDate(advanceDoctorId, advanceDate).length > 0 ? (
+                  <select
+                    value={advanceSessionId}
+                    onChange={(e) => setAdvanceSessionId(e.target.value ? Number(e.target.value) : '')}
+                    className="w-full px-3 py-2 rounded-xl border border-slate-300 focus:ring-2 focus:ring-teal-500 font-semibold text-slate-800"
+                  >
+                    {getSessionsForDoctorAndDate(advanceDoctorId, advanceDate).map((s) => (
+                      <option key={s.id} value={s.id} disabled={s.is_full}>
+                        {s.session_title} ({s.start_time} - {s.end_time}) — {s.available_slots ?? (s.max_patients - (s.booked_count || 0))}/{s.max_patients} slots left {s.is_full ? '⚠️ [FULL]' : ''}
+                      </option>
+                    ))}
+                  </select>
+                ) : (
+                  <div className="p-3 rounded-xl bg-slate-50 border border-slate-200 text-slate-600 text-xs">
+                    No recurring session scheduled on this date. Token will be booked to doctor's general schedule.
+                  </div>
+                )}
               </div>
 
               <div className="p-3 bg-blue-50/70 border border-blue-200 rounded-xl text-xs text-blue-900 space-y-1">

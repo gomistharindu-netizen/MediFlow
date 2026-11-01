@@ -21,7 +21,31 @@ class QueueManagerService
     {
         $visitDate = $date ?: date('Y-m-d');
 
-        // Check Session Capacity if session is specified
+        // Auto-detect active session if not explicitly provided
+        if (!$sessionId) {
+            $dayOfWeek = strtolower(date('l', strtotime($visitDate)));
+            $currentTime = date('H:i');
+
+            $activeSession = DoctorSession::where('doctor_id', $doctorId)
+                ->where('is_active', true)
+                ->where('day_of_week', $dayOfWeek)
+                ->where('start_time', '<=', $currentTime)
+                ->where('end_time', '>=', $currentTime)
+                ->first();
+
+            if (!$activeSession) {
+                $activeSession = DoctorSession::where('doctor_id', $doctorId)
+                    ->where('is_active', true)
+                    ->where('day_of_week', $dayOfWeek)
+                    ->first();
+            }
+
+            if ($activeSession) {
+                $sessionId = $activeSession->id;
+            }
+        }
+
+        // Check Session Capacity if session is specified or auto-resolved
         if ($sessionId) {
             $session = DoctorSession::findOrFail($sessionId);
             $currentCount = Visit::where('doctor_session_id', $sessionId)
@@ -102,7 +126,7 @@ class QueueManagerService
         $visitDate = $date ?: date('Y-m-d');
         $policy = ClinicSetting::get('queue_late_arrival_policy', 'FAIR_16_24');
 
-        $allVisits = Visit::with(['patient', 'doctor.user'])
+        $allVisits = Visit::with(['patient', 'doctor.user', 'session'])
             ->where('doctor_id', $doctorId)
             ->whereDate('visit_date', $visitDate)
             ->where('status', '!=', 'CANCELLED')

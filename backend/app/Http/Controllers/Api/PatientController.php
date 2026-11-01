@@ -12,7 +12,7 @@ class PatientController extends Controller
 {
     public function index(Request $request): JsonResponse
     {
-        $query = Patient::with(['todayVisit.doctor.user']);
+        $query = Patient::with(['todayVisit.doctor.user', 'todayVisit.session']);
 
         if ($search = $request->query('search')) {
             $query->where(function ($q) use ($search) {

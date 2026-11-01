@@ -10,10 +10,16 @@ use Illuminate\Http\Request;
 
 class DoctorController extends Controller
 {
-    public function index(): JsonResponse
+    public function index(Request $request): JsonResponse
     {
-        $doctors = Doctor::with(['user', 'sessions' => function ($q) {
-            $q->where('is_active', true);
+        $date = $request->query('date', date('Y-m-d'));
+
+        $doctors = Doctor::with(['user', 'sessions' => function ($q) use ($date) {
+            $q->where('is_active', true)
+              ->withCount(['visits as booked_count' => function ($vq) use ($date) {
+                  $vq->whereDate('visit_date', $date)
+                     ->where('status', '!=', 'CANCELLED');
+              }]);
         }])
         ->where('is_active', true)
         ->get();
@@ -24,11 +30,27 @@ class DoctorController extends Controller
         ]);
     }
 
-    public function sessions(): JsonResponse
+    public function sessions(Request $request): JsonResponse
     {
-        $sessions = DoctorSession::with('doctor.user')
+        $date = $request->query('date', date('Y-m-d'));
+        $doctorId = $request->query('doctor_id');
+
+        $query = DoctorSession::with('doctor.user')
             ->where('is_active', true)
-            ->get();
+            ->withCount(['visits as booked_count' => function ($q) use ($date) {
+                $q->whereDate('visit_date', $date)
+                  ->where('status', '!=', 'CANCELLED');
+            }]);
+
+        if ($doctorId) {
+            $query->where('doctor_id', $doctorId);
+        }
+
+        $sessions = $query->get()->map(function ($s) {
+            $s->available_slots = max(0, $s->max_patients - $s->booked_count);
+            $s->is_full = $s->booked_count >= $s->max_patients;
+            return $s;
+        });
 
         return response()->json([
             'success' => true,
