@@ -218,7 +218,7 @@ export default function DoctorSessionsPage() {
 
   const filteredSessions = sessions.filter(s => {
     if (selectedDoctorId !== 'ALL' && s.doctor_id !== selectedDoctorId) return false;
-    if (selectedDay !== 'ALL' && s.day_of_week !== selectedDay) return false;
+    if (selectedDay !== 'ALL' && s.day_of_week?.toLowerCase() !== selectedDay.toLowerCase()) return false;
     return true;
   });
 

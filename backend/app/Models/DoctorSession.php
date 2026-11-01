@@ -29,6 +29,22 @@ class DoctorSession extends Model
         ];
     }
 
+    /**
+     * Always persist day_of_week in lowercase to satisfy database CHECK constraints.
+     */
+    public function setDayOfWeekAttribute($value): void
+    {
+        $this->attributes['day_of_week'] = strtolower((string)$value);
+    }
+
+    /**
+     * Always return day_of_week capitalized for UI presentation.
+     */
+    public function getDayOfWeekAttribute($value): string
+    {
+        return ucfirst(strtolower((string)$value));
+    }
+
     public function doctor(): BelongsTo
     {
         return $this->belongsTo(Doctor::class);

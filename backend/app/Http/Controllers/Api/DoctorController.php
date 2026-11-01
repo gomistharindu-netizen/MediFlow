@@ -44,12 +44,14 @@ class DoctorController extends Controller
         $validated = $request->validate([
             'doctor_id'     => 'required|exists:doctors,id',
             'session_title' => 'required|string|max:255',
-            'day_of_week'   => 'required|in:Monday,Tuesday,Wednesday,Thursday,Friday,Saturday,Sunday',
+            'day_of_week'   => 'required|string|in:monday,tuesday,wednesday,thursday,friday,saturday,sunday,Monday,Tuesday,Wednesday,Thursday,Friday,Saturday,Sunday',
             'start_time'    => 'required|date_format:H:i',
             'end_time'      => 'required|date_format:H:i|after:start_time',
             'max_patients'  => 'required|integer|min:1|max:200',
             'is_active'     => 'sometimes|boolean',
         ]);
+
+        $validated['day_of_week'] = strtolower($validated['day_of_week']);
 
         $session = DoctorSession::create($validated);
         $session->load('doctor.user');
@@ -70,12 +72,16 @@ class DoctorController extends Controller
 
         $validated = $request->validate([
             'session_title' => 'sometimes|string|max:255',
-            'day_of_week'   => 'sometimes|in:Monday,Tuesday,Wednesday,Thursday,Friday,Saturday,Sunday',
+            'day_of_week'   => 'sometimes|string|in:monday,tuesday,wednesday,thursday,friday,saturday,sunday,Monday,Tuesday,Wednesday,Thursday,Friday,Saturday,Sunday',
             'start_time'    => 'sometimes|date_format:H:i',
             'end_time'      => 'sometimes|date_format:H:i',
             'max_patients'  => 'sometimes|integer|min:1|max:200',
             'is_active'     => 'sometimes|boolean',
         ]);
+
+        if (isset($validated['day_of_week'])) {
+            $validated['day_of_week'] = strtolower($validated['day_of_week']);
+        }
 
         $session->update($validated);
 
