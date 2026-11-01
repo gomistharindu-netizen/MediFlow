@@ -1,0 +1,39 @@
+# Dependencies
+**/node_modules/
+backend/vendor/
+
+# Environment and sensitive credentials
+.env
+.env.local
+.env.*.local
+.env.backup
+.env.production
+backend/.env
+frontend/.env.local
+frontend/.env*.local
+
+# Next.js Build Outputs
+frontend/.next/
+frontend/out/
+frontend/build/
+
+# Laravel Storage & Cache
+backend/storage/*.key
+backend/storage/logs/*.log
+backend/storage/framework/cache/data/*
+backend/storage/framework/sessions/*
+backend/storage/framework/views/*
+backend/storage/pail/*
+backend/.phpunit.result.cache
+
+# IDE & Editor files
+.vscode/
+.idea/
+*.sublime-project
+*.sublime-workspace
+
+# OS files
+.DS_Store
+Thumbs.db
+Desktop.ini
+*.log
