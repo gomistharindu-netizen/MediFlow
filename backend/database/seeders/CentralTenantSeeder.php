@@ -64,5 +64,37 @@ class CentralTenantSeeder extends Seeder
                 ])]
             );
         });
+
+        // 3. Provision Nawaloka Outpatient Care (Primary Active Clinic)
+        $nawaloka = Tenant::firstOrCreate(
+            ['id' => 'nawaloka'],
+            [
+                'clinic_name' => 'Nawaloka Outpatient Care',
+                'contact_email' => 'admin@nawaloka.lk',
+                'contact_phone' => '+94 11 544 4444',
+                'subscription_plan' => 'ENTERPRISE',
+                'status' => 'ACTIVE',
+            ]
+        );
+
+        if (!$nawaloka->domains()->where('domain', 'nawaloka.localhost')->exists()) {
+            $nawaloka->domains()->create(['domain' => 'nawaloka.localhost']);
+        }
+
+        // 4. Provision Asiri Health
+        $asiri = Tenant::firstOrCreate(
+            ['id' => 'asiri'],
+            [
+                'clinic_name' => 'Asiri Health',
+                'contact_email' => 'admin@asiri.lk',
+                'contact_phone' => '+94 11 452 3300',
+                'subscription_plan' => 'PROFESSIONAL',
+                'status' => 'ACTIVE',
+            ]
+        );
+
+        if (!$asiri->domains()->where('domain', 'asiri.localhost')->exists()) {
+            $asiri->domains()->create(['domain' => 'asiri.localhost']);
+        }
     }
 }

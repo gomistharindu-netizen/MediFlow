@@ -7,9 +7,11 @@ mkdir -p /app/database
 # Create central sqlite db if missing
 if [ ! -f /app/database/database.sqlite ]; then
     touch /app/database/database.sqlite
-    php artisan migrate --force
-    php artisan db:seed --class=CentralTenantSeeder --force || true
 fi
+
+# Run migrations and ensure all tenants are provisioned
+php artisan migrate --force
+php artisan db:seed --class=CentralTenantSeeder --force || true
 
 # Set permissions
 chmod -R 777 /app/storage /app/bootstrap/cache /app/database
