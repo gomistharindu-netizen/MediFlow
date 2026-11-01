@@ -1,1 +1,2 @@
-*.sqlite*
+# Allow SQLite central database to be tracked
+!database.sqlite
